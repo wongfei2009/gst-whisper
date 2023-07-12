@@ -12,7 +12,7 @@ cargo install cargo-c
 git clone https://github.com/avstack/gst-whisper
 cd gst-whisper
 cargo cbuild --release
-export GST_PLUGIN_PATH=$(pwd)/target/release
+export GST_PLUGIN_PATH=$(pwd)/target/x86_64-apple-darwin/release
 ```
 
 ## Example usage
@@ -22,7 +22,7 @@ You must already have the Whisper model.
 ```
 export WHISPER_MODEL_PATH=../whisper.cpp/models/ggml-base.en.bin
 
-gst-launch-1.0 --no-position autoaudiosrc ! audioconvert ! audioresample ! queue ! whisper ! fdsink
+gst-launch-1.0 filesrc location=../whisper.cpp/samples/jfk.wav ! decodebin ! audioconvert ! queue ! whisper ! fdsink
 ```
 
 ## License
