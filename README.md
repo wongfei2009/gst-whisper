@@ -1,6 +1,6 @@
 # gst-whisper: A GStreamer element that does speech-to-text using Whisper.
 
-Accepts 16kHz S16 audio buffers on its sink pad and produces text buffers on its source pad.
+Accept 16kHz S16 audio buffers on its sink pad and produce text buffers on its source pad.
 
 ## Installation
 
