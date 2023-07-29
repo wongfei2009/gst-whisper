@@ -26,7 +26,8 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "GST_PLUGIN_PATH": "${workspaceFolder}/target/x86_64-apple-darwin/debug",
-                "WHISPER_MODEL_PATH": "${workspaceFolder}/../whisper.cpp/models/ggml-base.en.bin"
+                "WHISPER_MODEL_PATH": "${workspaceFolder}/../whisper.cpp/models/ggml-base.en.bin",
+                "GST_DEBUG": "2,whisper:4" 
             }
         }
     ]
