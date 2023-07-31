@@ -400,7 +400,7 @@ impl WhisperFilter {
     }
 }
 
-pub struct VoiceActivityDetector {
+struct VoiceActivityDetector {
     vad_sender: mpsc::Sender<Vec<i16>>,
     voice_activity_detected: Arc<AtomicBool>,
 }
