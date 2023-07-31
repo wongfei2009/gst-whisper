@@ -314,6 +314,92 @@ impl ElementImpl for WhisperFilter {
     }
 }
 
+impl WhisperFilter {
+    fn read_samples(&self, buffer: &Buffer) -> Result<Vec<i16>, FlowError> {
+        let buffer_reader = buffer
+            .as_ref()
+            .map_readable()
+            .map_err(|_| FlowError::Error)?;
+        let samples = buffer_reader.as_slice_of().map_err(|_| FlowError::Error)?;
+        gstreamer::debug!(CAT, "generate_output(): reading {} samples", samples.len());
+
+        Ok(samples.to_vec())
+    }
+    fn send_vad_buffer(&self, state: &State, samples: &[i16]) {
+        // Check the length of the buffer to determine if there is voice activity
+        let buffer_len = samples.len();
+        if buffer_len >= 160 {
+            let vad_buffer = if buffer_len >= 480 {
+                // If the buffer is longer than 480 samples, use the last 480 samples
+                &samples[buffer_len - 480..buffer_len]
+            } else if buffer_len >= 320 {
+                // If the buffer is longer than 320 samples, use the last 320 samples
+                &samples[buffer_len - 320..buffer_len]
+            } else {
+                // Otherwise, use the last 160 samples
+                &samples[buffer_len - 160..buffer_len]
+            };
+            // Send a copy of the vad_buffer to the voice activity detection (VAD) sender
+            state.vad_sender.send(vad_buffer.to_vec()).unwrap();
+        }
+    }
+    fn handle_voice_activity_detected(
+        &self,
+        state: &mut State,
+        samples: &[i16],
+        buffer: &Buffer,
+    ) -> Result<GenerateOutputSuccess, FlowError> {
+        if let Some(chunk) = state.chunk.as_mut() {
+            chunk.buffer.extend_from_slice(samples);
+        } else {
+            gstreamer::debug!(CAT, "generate_output(): voice activity started");
+            state.chunk = Some(Chunk {
+                start_pts: buffer.pts().unwrap(),
+                buffer: state
+                    .prev_buffer
+                    .drain(..)
+                    .chain(samples.iter().copied())
+                    .collect(),
+            });
+        }
+
+        Ok(GenerateOutputSuccess::NoOutput)
+    }
+    fn handle_no_voice_activity(
+        &self,
+        state: &mut State,
+        samples: &[i16],
+        buffer: &Buffer,
+    ) -> Result<GenerateOutputSuccess, FlowError> {
+        state.prev_buffer = samples.to_vec();
+
+        if let Some(chunk) = state.chunk.take() {
+            gstreamer::debug!(CAT, "generate_output(): voice activity ended");
+            // Get the minimum voice activity duration from the settings
+            let min_voice_activity_ms = self.settings.lock().unwrap().min_voice_activity_ms;
+            if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= min_voice_activity_ms {
+                let maybe_buffer = self.run_model(state, chunk)?;
+                Ok(maybe_buffer
+                    .map(GenerateOutputSuccess::Buffer)
+                    .unwrap_or(GenerateOutputSuccess::NoOutput))
+            } else {
+                gstreamer::debug!(
+                    CAT,
+                    "generate_output(): discarding voice activity < {}ms",
+                    min_voice_activity_ms
+                );
+                Ok(GenerateOutputSuccess::NoOutput)
+            }
+        } else {
+            Ok(GenerateOutputSuccess::NoOutput)
+        }
+    }
+    fn handle_no_queued_buffer(&self) -> Result<GenerateOutputSuccess, FlowError> {
+        gstreamer::debug!(CAT, "generate_output(): no queued buffers to take");
+        Ok(GenerateOutputSuccess::NoOutput)
+    }
+}
+
 impl BaseTransformImpl for WhisperFilter {
     const MODE: BaseTransformMode = BaseTransformMode::NeverInPlace;
     const PASSTHROUGH_ON_SAME_CAPS: bool = false;
@@ -383,11 +469,8 @@ impl BaseTransformImpl for WhisperFilter {
     }
 
     fn generate_output(&self) -> Result<GenerateOutputSuccess, FlowError> {
-        // Check if there is a queued buffer to process
         if let Some(buffer) = self.take_queued_buffer() {
-            // Lock the state of the program and retrieve a mutable reference to the state
             let mut locked_state = self.state.lock().unwrap();
-            // Get the state from the locked state or return an error if the state is None
             let state = locked_state.as_mut().ok_or_else(|| {
                 element_imp_error!(
                     self,
@@ -396,87 +479,17 @@ impl BaseTransformImpl for WhisperFilter {
                 );
                 FlowError::NotNegotiated
             })?;
+            let samples = self.read_samples(&buffer)?;
 
-            // Read the data from the buffer using a buffer_reader
-            let buffer_reader = buffer
-                .as_ref()
-                .map_readable()
-                .map_err(|_| FlowError::Error)?;
-            let samples = buffer_reader.as_slice_of().map_err(|_| FlowError::Error)?;
-            gstreamer::debug!(CAT, "generate_output(): reading {} samples", samples.len());
+            self.send_vad_buffer(&state, &samples);
 
-            // Check the length of the buffer to determine if there is voice activity
-            let buffer_len = samples.len();
-            if buffer_len >= 160 {
-                let vad_buffer = if buffer_len >= 480 {
-                    // If the buffer is longer than 480 samples, use the last 480 samples
-                    &samples[buffer_len - 480..buffer_len]
-                } else if buffer_len >= 320 {
-                    // If the buffer is longer than 320 samples, use the last 320 samples
-                    &samples[buffer_len - 320..buffer_len]
-                } else {
-                    // Otherwise, use the last 160 samples
-                    &samples[buffer_len - 160..buffer_len]
-                };
-                // Send a copy of the vad_buffer to the voice activity detection (VAD) sender
-                state.vad_sender.send(vad_buffer.to_vec()).unwrap();
-            }
-
-            // Check if there is voice activity in the buffer
             if state.voice_activity_detected.load(Ordering::Relaxed) {
-                // If there is an existing chunk in the state, append the samples to the existing chunk
-                if let Some(chunk) = state.chunk.as_mut() {
-                    chunk.buffer.extend_from_slice(samples);
-                } else {
-                    // Otherwise, create a new chunk and set the start_pts field to the PTS of the buffer
-                    gstreamer::debug!(CAT, "generate_output(): voice activity started");
-                    state.chunk = Some(Chunk {
-                        start_pts: buffer.pts().unwrap(),
-                        buffer: state
-                            .prev_buffer
-                            .drain(..)
-                            .chain(samples.iter().copied())
-                            .collect(),
-                    });
-                }
-
-                // Return GenerateOutputSuccess::NoOutput because there is no output yet
-                Ok(GenerateOutputSuccess::NoOutput)
+                self.handle_voice_activity_detected(state, &samples, &buffer)
             } else {
-                // If there is no voice activity, store the samples in the prev_buffer field of the state
-                state.prev_buffer = samples.to_vec();
-
-                // If there is an existing chunk in the state, voice activity has ended
-                if let Some(chunk) = state.chunk.take() {
-                    gstreamer::debug!(CAT, "generate_output(): voice activity ended");
-                    // Get the minimum voice activity duration from the settings
-                    let min_voice_activity_ms = self.settings.lock().unwrap().min_voice_activity_ms;
-                    // If the duration of the voice activity is greater than or equal to the minimum duration, run a model on the chunk to generate output
-                    if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= min_voice_activity_ms
-                    {
-                        let maybe_buffer = self.run_model(state, chunk)?;
-                        // If there is output, return it as a GenerateOutputSuccess::Buffer variant, otherwise return GenerateOutputSuccess::NoOutput
-                        Ok(maybe_buffer
-                            .map(GenerateOutputSuccess::Buffer)
-                            .unwrap_or(GenerateOutputSuccess::NoOutput))
-                    } else {
-                        // If the duration is less than the minimum duration, discard the chunk and return GenerateOutputSuccess::NoOutput
-                        gstreamer::debug!(
-                            CAT,
-                            "generate_output(): discarding voice activity < {}ms",
-                            min_voice_activity_ms
-                        );
-                        Ok(GenerateOutputSuccess::NoOutput)
-                    }
-                } else {
-                    // If there is no existing chunk, return GenerateOutputSuccess::NoOutput
-                    Ok(GenerateOutputSuccess::NoOutput)
-                }
+                self.handle_no_voice_activity(state, &samples, &buffer)
             }
         } else {
-            // If there is no queued buffer to process, return GenerateOutputSuccess::NoOutput
-            gstreamer::debug!(CAT, "generate_output(): no queued buffers to take");
-            Ok(GenerateOutputSuccess::NoOutput)
+            self.handle_no_queued_buffer()
         }
     }
 }
