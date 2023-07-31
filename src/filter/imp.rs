@@ -514,20 +514,18 @@ impl BaseTransformImpl for WhisperFilter {
                 FlowError::NotNegotiated
             })?;
             let samples = self.read_samples(&buffer)?;
+            let vad_buffer = self.new_vad_buffer(&samples);
 
-            if let Some(vad_buffer) = &self.new_vad_buffer(&samples) {
-                if state
+            if let Some(vad_buffer) = vad_buffer {
+                let is_voice_segment = state
                     .voice_activity_detector
-                    .is_voice_segment(vad_buffer)
-                    .unwrap()
-                {
-                    self.handle_voice_activity_detected(state, &samples, &buffer)
-                } else {
-                    self.handle_no_voice_activity(state, &samples, &buffer)
+                    .is_voice_segment(&vad_buffer)
+                    .unwrap();
+                if is_voice_segment {
+                    return self.handle_voice_activity_detected(state, &samples, &buffer);
                 }
-            } else {
-                self.handle_no_voice_activity(state, &samples, &buffer)
             }
+            self.handle_no_voice_activity(state, &samples, &buffer)
         } else {
             self.handle_no_queued_buffer()
         }
