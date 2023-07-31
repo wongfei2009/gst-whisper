@@ -78,8 +78,7 @@ struct Settings {
 
 struct State {
     whisper_state: WhisperState<'static>,
-    voice_activity_detected: Arc<AtomicBool>,
-    vad_sender: mpsc::Sender<Vec<i16>>,
+    voice_activity_detector: VoiceActivityDetector,
     chunk: Option<Chunk>,
     prev_buffer: Vec<i16>,
 }
@@ -325,7 +324,7 @@ impl WhisperFilter {
 
         Ok(samples.to_vec())
     }
-    fn send_vad_buffer(&self, state: &State, samples: &[i16]) {
+    fn new_vad_buffer(&self, samples: &[i16]) -> Option<Vec<i16>> {
         // Check the length of the buffer to determine if there is voice activity
         let buffer_len = samples.len();
         if buffer_len >= 160 {
@@ -339,8 +338,9 @@ impl WhisperFilter {
                 // Otherwise, use the last 160 samples
                 &samples[buffer_len - 160..buffer_len]
             };
-            // Send a copy of the vad_buffer to the voice activity detection (VAD) sender
-            state.vad_sender.send(vad_buffer.to_vec()).unwrap();
+            Some(vad_buffer.to_vec())
+        } else {
+            None
         }
     }
     fn handle_voice_activity_detected(
@@ -400,6 +400,39 @@ impl WhisperFilter {
     }
 }
 
+pub struct VoiceActivityDetector {
+    vad_sender: mpsc::Sender<Vec<i16>>,
+    voice_activity_detected: Arc<AtomicBool>,
+}
+
+impl VoiceActivityDetector {
+    pub fn new(vad_mode: VadMode) -> Self {
+        let voice_activity_detected = Arc::new(AtomicBool::new(false));
+        let (vad_sender, vad_receiver) = mpsc::channel::<Vec<i16>>();
+        {
+            let voice_activity_detected = voice_activity_detected.clone();
+            thread::spawn(move || {
+                let mut vad =
+                    Vad::new_with_rate_and_mode((SAMPLE_RATE as i32).try_into().unwrap(), vad_mode);
+                while let Ok(next) = vad_receiver.recv() {
+                    let result = vad.is_voice_segment(&next).unwrap();
+                    voice_activity_detected.store(result, Ordering::Relaxed);
+                }
+            })
+        };
+
+        Self {
+            vad_sender,
+            voice_activity_detected,
+        }
+    }
+
+    pub fn is_voice_segment(&self, buffer: &[i16]) -> Result<bool, ()> {
+        self.vad_sender.send(buffer.to_vec()).unwrap();
+        Ok(self.voice_activity_detected.load(Ordering::Relaxed))
+    }
+}
+
 impl BaseTransformImpl for WhisperFilter {
     const MODE: BaseTransformMode = BaseTransformMode::NeverInPlace;
     const PASSTHROUGH_ON_SAME_CAPS: bool = false;
@@ -407,35 +440,17 @@ impl BaseTransformImpl for WhisperFilter {
 
     fn start(&self) -> Result<(), ErrorMessage> {
         gstreamer::debug!(CAT, "start()");
-
-        let voice_activity_detected = Arc::new(AtomicBool::new(false));
-        let (vad_sender, vad_receiver) = mpsc::channel::<Vec<i16>>();
-        {
-            let voice_activity_detected = voice_activity_detected.clone();
-            let vad_mode = match self.settings.lock().unwrap().vad_mode.as_str() {
-                "quality" => VadMode::Quality,
-                "low-bitrate" => VadMode::LowBitrate,
-                "aggressive" => VadMode::Aggressive,
-                "very-aggressive" => VadMode::VeryAggressive,
-                other => panic!("invalid VAD mode: {}", other),
-            };
-            thread::spawn(move || {
-                gstreamer::debug!(CAT, "vad starting");
-                let mut vad =
-                    Vad::new_with_rate_and_mode((SAMPLE_RATE as i32).try_into().unwrap(), vad_mode);
-                while let Ok(next) = vad_receiver.recv() {
-                    let result = vad.is_voice_segment(&next).unwrap();
-                    gstreamer::debug!(CAT, "vad result: {}", result);
-                    voice_activity_detected.store(result, Ordering::Relaxed);
-                }
-                gstreamer::debug!(CAT, "vad stopped");
-            });
-        }
+        let vad_mode = match self.settings.lock().unwrap().vad_mode.as_str() {
+            "quality" => VadMode::Quality,
+            "low-bitrate" => VadMode::LowBitrate,
+            "aggressive" => VadMode::Aggressive,
+            "very-aggressive" => VadMode::VeryAggressive,
+            other => panic!("invalid VAD mode: {}", other),
+        };
 
         *self.state.lock().unwrap() = Some(State {
             whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
-            voice_activity_detected,
-            vad_sender,
+            voice_activity_detector: VoiceActivityDetector::new(vad_mode),
             chunk: None,
             prev_buffer: Vec::new(),
         });
@@ -480,10 +495,12 @@ impl BaseTransformImpl for WhisperFilter {
                 FlowError::NotNegotiated
             })?;
             let samples = self.read_samples(&buffer)?;
-
-            self.send_vad_buffer(&state, &samples);
-
-            if state.voice_activity_detected.load(Ordering::Relaxed) {
+            
+            if state
+                .voice_activity_detector
+                .is_voice_segment(&self.new_vad_buffer(&samples).unwrap())
+                .unwrap()
+            {
                 self.handle_voice_activity_detected(state, &samples, &buffer)
             } else {
                 self.handle_no_voice_activity(state, &samples, &buffer)
