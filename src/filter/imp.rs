@@ -350,6 +350,7 @@ impl WhisperFilter {
         buffer: &Buffer,
     ) -> Result<GenerateOutputSuccess, FlowError> {
         if let Some(chunk) = state.chunk.as_mut() {
+            gstreamer::debug!(CAT, "generate_output(): voice activity is on-going");
             chunk.buffer.extend_from_slice(samples);
         } else {
             gstreamer::debug!(CAT, "generate_output(): voice activity started");
@@ -374,7 +375,7 @@ impl WhisperFilter {
         state.prev_buffer = samples.to_vec();
 
         if let Some(chunk) = state.chunk.take() {
-            gstreamer::debug!(CAT, "generate_output(): voice activity ended");
+            gstreamer::info!(CAT, "generate_output(): voice activity ended");
             // Get the minimum voice activity duration from the settings
             let min_voice_activity_ms = self.settings.lock().unwrap().min_voice_activity_ms;
             if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= min_voice_activity_ms {
@@ -383,7 +384,7 @@ impl WhisperFilter {
                     .map(GenerateOutputSuccess::Buffer)
                     .unwrap_or(GenerateOutputSuccess::NoOutput))
             } else {
-                gstreamer::debug!(
+                gstreamer::warning!(
                     CAT,
                     "generate_output(): discarding voice activity < {}ms",
                     min_voice_activity_ms
