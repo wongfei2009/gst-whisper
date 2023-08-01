@@ -129,7 +129,6 @@ impl WhisperFilter {
 
         let n_segments = state.whisper_state.full_n_segments().unwrap();
         if n_segments > 0 {
-            assert!(n_segments == 1);
 
             if let Ok(segment) = state.whisper_state.full_get_segment_text(0) {
                 let segment = segment
