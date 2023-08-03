@@ -13,7 +13,7 @@ use gstreamer::{
         ElementMetadata,
     },
     Buffer, Caps, CapsIntersectMode, ClockTime, CoreError, DebugCategory, ErrorMessage, FlowError,
-    PadDirection, PadPresence, PadTemplate,
+    PadDirection, PadPresence, PadTemplate, EventView, traits::{ElementExt, PadExt},
 };
 use gstreamer_audio::{AudioCapsBuilder, AudioLayout, AUDIO_FORMAT_S16};
 use gstreamer_base::{
@@ -400,6 +400,19 @@ impl WhisperFilter {
             Ok(GenerateOutputSuccess::NoOutput)
         }
     }
+    fn handle_eos(
+        &self,
+        state: &mut State
+    ) {
+        if let Some(chunk) = state.chunk.take() {
+            gstreamer::info!(CAT, "voice activity ended");
+            let maybe_buffer = self.run_model(state, chunk);
+            let srcpad = self.obj().static_pad("src").unwrap();
+            if let Ok(Some(buffer)) = maybe_buffer {
+                let _ = srcpad.push(buffer);
+            }
+        } 
+    }
 }
 
 impl BaseTransformImpl for WhisperFilter {
@@ -491,5 +504,15 @@ impl BaseTransformImpl for WhisperFilter {
             gstreamer::debug!(CAT, "no queued buffers to take");
             Ok(GenerateOutputSuccess::NoOutput)
         }
+    }
+
+    fn sink_event(&self, event: gstreamer::Event) -> bool {
+        if let EventView::Eos(_) = event.view() {
+            gstreamer::info!(CAT, imp: self, "Handling EOS");
+            let mut locked_state = self.state.lock().unwrap();
+            let state = locked_state.as_mut().unwrap();
+            self.handle_eos(state);
+        }
+        self.parent_sink_event(event)
     }
 }
