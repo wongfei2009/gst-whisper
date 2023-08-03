@@ -1,10 +1,6 @@
 mod vad;
 
-use std::{
-    env,
-    sync::Mutex,
-    time::Instant,
-};
+use std::{env, sync::Mutex, time::Instant};
 
 use byte_slice_cast::AsSliceOf;
 use gstreamer::{
@@ -123,7 +119,7 @@ impl WhisperFilter {
             .whisper_state
             .full(self.whisper_params(), &samples)
             .unwrap();
-        gstreamer::debug!(CAT, "run_model(): model took {:?}", start.elapsed());
+        gstreamer::debug!(CAT, "model took {:?}", start.elapsed());
 
         let n_segments = state.whisper_state.full_n_segments().unwrap();
         if n_segments > 0 {
@@ -316,7 +312,7 @@ impl WhisperFilter {
             .map_readable()
             .map_err(|_| FlowError::Error)?;
         let samples = buffer_reader.as_slice_of().map_err(|_| FlowError::Error)?;
-        gstreamer::debug!(CAT, "generate_output(): reading {} samples", samples.len());
+        gstreamer::debug!(CAT, "reading {} samples", samples.len());
 
         Ok(samples.to_vec())
     }
@@ -339,17 +335,17 @@ impl WhisperFilter {
             None
         }
     }
-    fn handle_voice_activity_detected(
+    fn handle_voice_activity(
         &self,
         state: &mut State,
         samples: &[i16],
         buffer: &Buffer,
     ) -> Result<GenerateOutputSuccess, FlowError> {
         if let Some(chunk) = state.chunk.as_mut() {
-            gstreamer::debug!(CAT, "generate_output(): voice activity is on-going");
+            gstreamer::debug!(CAT, "voice activity is on-going");
             chunk.buffer.extend_from_slice(samples);
         } else {
-            gstreamer::debug!(CAT, "generate_output(): voice activity started");
+            gstreamer::debug!(CAT, "voice activity started");
             state.chunk = Some(Chunk {
                 start_pts: buffer.pts().unwrap(),
                 buffer: state
@@ -362,7 +358,7 @@ impl WhisperFilter {
 
         Ok(GenerateOutputSuccess::NoOutput)
     }
-    fn handle_no_voice_activity(
+    fn handle_voice_activity_end(
         &self,
         state: &mut State,
         samples: &[i16],
@@ -371,7 +367,7 @@ impl WhisperFilter {
         state.prev_buffer = samples.to_vec();
 
         if let Some(chunk) = state.chunk.take() {
-            gstreamer::info!(CAT, "generate_output(): voice activity ended");
+            gstreamer::info!(CAT, "voice activity ended");
             // Get the minimum voice activity duration from the settings
             let min_voice_activity_ms = self.settings.lock().unwrap().min_voice_activity_ms;
             if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= min_voice_activity_ms {
@@ -382,7 +378,7 @@ impl WhisperFilter {
             } else {
                 gstreamer::warning!(
                     CAT,
-                    "generate_output(): discarding voice activity < {}ms",
+                    "discarding voice activity < {}ms",
                     min_voice_activity_ms
                 );
                 Ok(GenerateOutputSuccess::NoOutput)
@@ -390,10 +386,6 @@ impl WhisperFilter {
         } else {
             Ok(GenerateOutputSuccess::NoOutput)
         }
-    }
-    fn handle_no_queued_buffer(&self) -> Result<GenerateOutputSuccess, FlowError> {
-        gstreamer::debug!(CAT, "generate_output(): no queued buffers to take");
-        Ok(GenerateOutputSuccess::NoOutput)
     }
 }
 
@@ -403,7 +395,7 @@ impl BaseTransformImpl for WhisperFilter {
     const TRANSFORM_IP_ON_PASSTHROUGH: bool = false;
 
     fn start(&self) -> Result<(), ErrorMessage> {
-        gstreamer::debug!(CAT, "start()");
+        gstreamer::debug!(CAT, "starting");
         let vad_mode = match self.settings.lock().unwrap().vad_mode.as_str() {
             "quality" => VadMode::Quality,
             "low-bitrate" => VadMode::LowBitrate,
@@ -419,14 +411,14 @@ impl BaseTransformImpl for WhisperFilter {
             prev_buffer: Vec::new(),
         });
 
-        gstreamer::debug!(CAT, "start(): started");
+        gstreamer::debug!(CAT, "started");
         Ok(())
     }
 
     fn stop(&self) -> Result<(), ErrorMessage> {
-        gstreamer::debug!(CAT, "stop()");
+        gstreamer::debug!(CAT, "stopping");
         let _ = self.state.lock().unwrap().take();
-        gstreamer::debug!(CAT, "stop(): stopped");
+        gstreamer::debug!(CAT, "stopped");
         Ok(())
     }
 
@@ -467,12 +459,13 @@ impl BaseTransformImpl for WhisperFilter {
                     .is_voice_segment(&vad_buffer)
                     .unwrap();
                 if is_voice_segment {
-                    return self.handle_voice_activity_detected(state, &samples, &buffer);
+                    return self.handle_voice_activity(state, &samples, &buffer);
                 }
             }
-            self.handle_no_voice_activity(state, &samples, &buffer)
+            self.handle_voice_activity_end(state, &samples, &buffer)
         } else {
-            self.handle_no_queued_buffer()
+            gstreamer::debug!(CAT, "no queued buffers to take");
+            Ok(GenerateOutputSuccess::NoOutput)
         }
     }
 }
