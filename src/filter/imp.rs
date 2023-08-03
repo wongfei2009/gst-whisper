@@ -74,7 +74,7 @@ struct Settings {
 
 struct State {
     whisper_state: WhisperState<'static>,
-    voice_activity_detector: vad::VoiceActivityDetector,
+    voice_activity_detector: Option<vad::VoiceActivityDetector>,
     chunk: Option<Chunk>,
     prev_buffer: Vec<i16>,
 }
@@ -419,7 +419,7 @@ impl BaseTransformImpl for WhisperFilter {
 
         *self.state.lock().unwrap() = Some(State {
             whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
-            voice_activity_detector: vad::VoiceActivityDetector::new(vad_mode),
+            voice_activity_detector: Some(vad::VoiceActivityDetector::new(vad_mode)),
             chunk: None,
             prev_buffer: Vec::new(),
         });
@@ -464,15 +464,13 @@ impl BaseTransformImpl for WhisperFilter {
                 FlowError::NotNegotiated
             })?;
             let samples = self.read_samples(&buffer)?;
+            
             let vad_buffer = self.new_vad_buffer(&samples);
-
             if let Some(vad_buffer) = vad_buffer {
-                let is_voice_segment = state
-                    .voice_activity_detector
-                    .is_voice_segment(&vad_buffer)
-                    .unwrap();
-                if is_voice_segment {
-                    return self.handle_voice_activity(state, &samples, &buffer);
+                if let Some(vad) = &state.voice_activity_detector {
+                    if vad.is_voice_segment(&vad_buffer).unwrap() {
+                        return self.handle_voice_activity(state, &samples, &buffer);
+                    }
                 }
             }
             self.handle_voice_activity_end(state, &samples, &buffer)
