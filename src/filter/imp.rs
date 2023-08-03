@@ -197,7 +197,7 @@ impl ObjectImpl for WhisperFilter {
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
             vec![
-      glib::ParamSpecString::builder("use-vad")
+      glib::ParamSpecBoolean::builder("use-vad")
         .nick("Use VAD")
         .blurb(&format!("Whether to use VAD. Defaults to {}.", DEFAULT_USE_VAD))
         .mutable_ready()
@@ -417,13 +417,21 @@ impl BaseTransformImpl for WhisperFilter {
             other => panic!("invalid VAD mode: {}", other),
         };
 
-        *self.state.lock().unwrap() = Some(State {
+        let use_vad = self.settings.lock().unwrap().use_vad;
+
+        if use_vad {
+            *self.state.lock().unwrap() = Some(State {
             whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
             voice_activity_detector: Some(vad::VoiceActivityDetector::new(vad_mode)),
             chunk: None,
-            prev_buffer: Vec::new(),
-        });
-
+            prev_buffer: Vec::new(),}) 
+        } else {
+            *self.state.lock().unwrap() = Some(State {
+                whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
+                voice_activity_detector: None,
+                chunk: None,
+                prev_buffer: Vec::new(),}) 
+        }
         gstreamer::debug!(CAT, "started");
         Ok(())
     }
@@ -464,16 +472,21 @@ impl BaseTransformImpl for WhisperFilter {
                 FlowError::NotNegotiated
             })?;
             let samples = self.read_samples(&buffer)?;
-            
-            let vad_buffer = self.new_vad_buffer(&samples);
-            if let Some(vad_buffer) = vad_buffer {
-                if let Some(vad) = &state.voice_activity_detector {
-                    if vad.is_voice_segment(&vad_buffer).unwrap() {
-                        return self.handle_voice_activity(state, &samples, &buffer);
+            let use_vad = self.settings.lock().unwrap().use_vad;
+            if use_vad {
+                let vad_buffer = self.new_vad_buffer(&samples);
+                if let Some(vad_buffer) = vad_buffer {
+                    if let Some(vad) = &state.voice_activity_detector {
+                        if vad.is_voice_segment(&vad_buffer).unwrap() {
+                            return self.handle_voice_activity(state, &samples, &buffer);
+                        }
                     }
                 }
+                self.handle_voice_activity_end(state, &samples, &buffer)
+            } else {
+                gstreamer::debug!(CAT, "no queued buffers to take");
+                Ok(GenerateOutputSuccess::NoOutput)
             }
-            self.handle_voice_activity_end(state, &samples, &buffer)
         } else {
             gstreamer::debug!(CAT, "no queued buffers to take");
             Ok(GenerateOutputSuccess::NoOutput)
