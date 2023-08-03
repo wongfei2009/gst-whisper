@@ -31,6 +31,7 @@ use whisper_rs::{
 
 const SAMPLE_RATE: usize = 16_000;
 
+const DEFAULT_USE_VAD: bool = false;
 const DEFAULT_VAD_MODE: &str = "quality";
 const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 200;
 const DEFAULT_LANGUAGE: &str = "en";
@@ -63,6 +64,7 @@ static SRC_CAPS: Lazy<Caps> =
     Lazy::new(|| Caps::builder("text/x-raw").field("format", "utf8").build());
 
 struct Settings {
+    use_vad: bool,
     vad_mode: String,
     min_voice_activity_ms: u64,
     language: String,
@@ -179,6 +181,7 @@ impl ObjectSubclass for WhisperFilter {
     fn new() -> Self {
         Self {
             settings: Mutex::new(Settings {
+                use_vad: DEFAULT_USE_VAD,
                 vad_mode: DEFAULT_VAD_MODE.into(),
                 min_voice_activity_ms: DEFAULT_MIN_VOICE_ACTIVITY_MS,
                 language: DEFAULT_LANGUAGE.into(),
@@ -194,6 +197,13 @@ impl ObjectImpl for WhisperFilter {
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
             vec![
+      glib::ParamSpecString::builder("use-vad")
+        .nick("Use VAD")
+        .blurb(&format!("Whether to use VAD. Defaults to {}.", DEFAULT_USE_VAD))
+        .mutable_ready()
+        .mutable_paused()
+        .mutable_playing()
+        .build(),   
       glib::ParamSpecString::builder("vad-mode")
         .nick("VAD mode")
         .blurb(&format!("The aggressiveness of voice detection. Defaults to '{}'. Other options are 'low-bitrate', 'aggressive' and 'very-aggressive'.", DEFAULT_VAD_MODE))
@@ -237,6 +247,9 @@ impl ObjectImpl for WhisperFilter {
     fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
         let mut settings = self.settings.lock().unwrap();
         match pspec.name() {
+            "use-vad" => {
+                settings.use_vad = value.get().unwrap();
+            }
             "vad-mode" => {
                 settings.vad_mode = value.get().unwrap();
             }
