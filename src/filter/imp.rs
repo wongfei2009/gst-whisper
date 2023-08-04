@@ -37,6 +37,7 @@ const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 200;
 const DEFAULT_LANGUAGE: &str = "en";
 const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
+const DEFAULT_LENGTH_MS: u64 = 10000;
 
 static WHISPER_CONTEXT: Lazy<WhisperContext> = Lazy::new(|| {
     let path = env::var("WHISPER_MODEL_PATH").unwrap();
@@ -381,7 +382,6 @@ impl WhisperFilter {
 
         if let Some(chunk) = state.chunk.take() {
             gstreamer::info!(CAT, "voice activity ended");
-            // Get the minimum voice activity duration from the settings
             let min_voice_activity_ms = self.settings.lock().unwrap().min_voice_activity_ms;
             if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= min_voice_activity_ms {
                 let maybe_buffer = self.run_model(state, chunk)?;
@@ -497,7 +497,12 @@ impl BaseTransformImpl for WhisperFilter {
                 }
                 self.handle_voice_activity_end(state, &samples, &buffer)
             } else {
-                Ok(GenerateOutputSuccess::NoOutput)
+                if let Some(chunk) = state.chunk.as_mut() {
+                    if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= DEFAULT_LENGTH_MS {
+                        return self.handle_voice_activity_end(state, &samples, &buffer)
+                    } 
+                } 
+                return self.handle_voice_activity(state, &samples, &buffer);
             }
         } else {
             gstreamer::debug!(CAT, "no queued buffers to take");
