@@ -497,7 +497,6 @@ impl BaseTransformImpl for WhisperFilter {
                 }
                 self.handle_voice_activity_end(state, &samples, &buffer)
             } else {
-                gstreamer::debug!(CAT, "no queued buffers to take");
                 Ok(GenerateOutputSuccess::NoOutput)
             }
         } else {
