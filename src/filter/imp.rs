@@ -334,14 +334,14 @@ impl WhisperFilter {
         let buffer_len = samples.len();
         if buffer_len >= 160 {
             let vad_buffer = if buffer_len >= 480 {
-                // If the buffer is longer than 480 samples, use the last 480 samples
-                &samples[buffer_len - 480..buffer_len]
+                // If the buffer is longer than 480 samples, use the first 480 samples
+                &samples[0..480]
             } else if buffer_len >= 320 {
-                // If the buffer is longer than 320 samples, use the last 320 samples
-                &samples[buffer_len - 320..buffer_len]
+                // If the buffer is longer than 320 samples, use the first 320 samples
+                &samples[0..320]
             } else {
-                // Otherwise, use the last 160 samples
-                &samples[buffer_len - 160..buffer_len]
+                // Otherwise, use the first 160 samples
+                &samples[0..160]
             };
             Some(vad_buffer.to_vec())
         } else {
