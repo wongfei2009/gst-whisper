@@ -92,6 +92,7 @@ pub struct WhisperFilter {
 }
 
 impl WhisperFilter {
+    // Create a new set of parameters for the Whisper model.
     fn whisper_params(&self) -> FullParams {
         let mut params = FullParams::new(SamplingStrategy::default());
         params.set_print_progress(false);
@@ -114,8 +115,8 @@ impl WhisperFilter {
         params
     }
 
-    /// Run the model on the given chunk of audio samples.  Returns the text
-    /// output of the model, if any.
+    // Run the model on the given chunk of audio samples.  Returns the text
+    // output of the model, if any.
     fn run_model(&self, state: &mut State, chunk: Chunk) -> Result<Option<Buffer>, FlowError> {
         let samples = convert_integer_to_float_audio(&chunk.buffer);
 
@@ -181,6 +182,7 @@ impl ObjectSubclass for WhisperFilter {
 
     const NAME: &'static str = "GstWhisperFilter";
 
+    // Create a new instance of the filter
     fn new() -> Self {
         Self {
             settings: Mutex::new(Settings {
@@ -197,6 +199,7 @@ impl ObjectSubclass for WhisperFilter {
 }
 
 impl ObjectImpl for WhisperFilter {
+    // Add properties for the filter
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
             vec![
@@ -246,7 +249,7 @@ impl ObjectImpl for WhisperFilter {
         });
         PROPERTIES.as_ref()
     }
-
+    // Set the value of a property
     fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
         let mut settings = self.settings.lock().unwrap();
         match pspec.name() {
@@ -271,7 +274,7 @@ impl ObjectImpl for WhisperFilter {
             other => panic!("no such property: {}", other),
         }
     }
-
+    // Get the value of a property
     fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
         let settings = self.settings.lock().unwrap();
         match pspec.name() {
@@ -288,6 +291,7 @@ impl ObjectImpl for WhisperFilter {
 impl GstObjectImpl for WhisperFilter {}
 
 impl ElementImpl for WhisperFilter {
+    //  Add metadata for the filter
     fn metadata() -> Option<&'static ElementMetadata> {
         static ELEMENT_METADATA: Lazy<ElementMetadata> = Lazy::new(|| {
             ElementMetadata::new(
@@ -300,7 +304,7 @@ impl ElementImpl for WhisperFilter {
 
         Some(&*ELEMENT_METADATA)
     }
-
+    // Add pads for the filter
     fn pad_templates() -> &'static [PadTemplate] {
         static PAD_TEMPLATES: Lazy<Vec<PadTemplate>> = Lazy::new(|| {
             let src_pad_template =
@@ -322,6 +326,7 @@ impl ElementImpl for WhisperFilter {
 }
 
 impl WhisperFilter {
+    // Read the samples from the given buffer
     fn read_samples(&self, buffer: &Buffer) -> Result<Vec<i16>, FlowError> {
         let buffer_reader = buffer
             .as_ref()
@@ -332,6 +337,7 @@ impl WhisperFilter {
 
         Ok(samples.to_vec())
     }
+    // Create a new buffer for the voice activity detector
     fn new_vad_buffer(&self, samples: &[i16]) -> Option<Vec<i16>> {
         // Check the length of the buffer to determine if there is voice activity
         let buffer_len = samples.len();
