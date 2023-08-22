@@ -114,6 +114,8 @@ impl WhisperFilter {
         params
     }
 
+    /// Run the model on the given chunk of audio samples.  Returns the text
+    /// output of the model, if any.
     fn run_model(&self, state: &mut State, chunk: Chunk) -> Result<Option<Buffer>, FlowError> {
         let samples = convert_integer_to_float_audio(&chunk.buffer);
 
