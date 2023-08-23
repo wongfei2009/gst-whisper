@@ -1,4 +1,3 @@
-
 use std::sync::atomic::Ordering;
 
 use super::SAMPLE_RATE;

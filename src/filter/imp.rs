@@ -12,8 +12,9 @@ use gstreamer::{
         prelude::{ElementImpl, GstObjectImpl, ObjectImpl, ObjectSubclass, ObjectSubclassExt},
         ElementMetadata,
     },
-    Buffer, Caps, CapsIntersectMode, ClockTime, CoreError, DebugCategory, ErrorMessage, FlowError,
-    PadDirection, PadPresence, PadTemplate, EventView, traits::{ElementExt, PadExt},
+    traits::{ElementExt, PadExt},
+    Buffer, Caps, CapsIntersectMode, ClockTime, CoreError, DebugCategory, ErrorMessage, EventView,
+    FlowError, PadDirection, PadPresence, PadTemplate,
 };
 use gstreamer_audio::{AudioCapsBuilder, AudioLayout, AUDIO_FORMAT_S16};
 use gstreamer_base::{
@@ -58,15 +59,15 @@ static CAT: Lazy<DebugCategory> = Lazy::new(|| {
 
 static SINK_CAPS: Lazy<Caps> = Lazy::new(|| {
     AudioCapsBuilder::new()
-    .format(AUDIO_FORMAT_S16)
-    .layout(AudioLayout::NonInterleaved)
-    .rate(SAMPLE_RATE as i32)
-    .channels(1)
-    .build()
+        .format(AUDIO_FORMAT_S16)
+        .layout(AudioLayout::NonInterleaved)
+        .rate(SAMPLE_RATE as i32)
+        .channels(1)
+        .build()
 });
 
 static SRC_CAPS: Lazy<Caps> =
-Lazy::new(|| Caps::builder("text/x-raw").field("format", "utf8").build());
+    Lazy::new(|| Caps::builder("text/x-raw").field("format", "utf8").build());
 
 /// Struct representing the settings for the whisper filter.
 struct Settings {
@@ -129,64 +130,69 @@ impl WhisperFilter {
         params
     }
     /// Runs the whisper model on the given audio chunk and returns the resulting text segment as a buffer.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `state` - A mutable reference to the current state of the whisper filter.
     /// * `chunk` - The audio chunk to run the model on.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a Result containing an optional Buffer. If the model produces a text segment, it is returned as a Some(Buffer). Otherwise, None is returned.
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns a FlowError if there is an error creating the buffer.
     fn run_model(&self, state: &mut State, chunk: Chunk) -> Result<Option<Buffer>, FlowError> {
         let samples = convert_integer_to_float_audio(&chunk.buffer);
-        
+
         let start = Instant::now();
-        state.whisper_state.full(self.whisper_params(), &samples).unwrap();
+        state
+            .whisper_state
+            .full(self.whisper_params(), &samples)
+            .unwrap();
         gstreamer::debug!(CAT, "model took {:?}", start.elapsed());
-        
+
         let n_segments = state.whisper_state.full_n_segments().unwrap();
         if n_segments == 0 {
             return Ok(None);
         }
-        
+
         let segment = state.whisper_state.full_get_segment_text(0).ok().unwrap();
         let segment = segment
-        .replace("[BLANK_AUDIO]", "")
-        .replace("[ Silence ]", "")
-        .replace("[silence]", "")
-        .replace("(silence)", "")
-        .replace("[ Pause ]", "")
-        .trim()
-        .to_owned();
-        
+            .replace("[BLANK_AUDIO]", "")
+            .replace("[ Silence ]", "")
+            .replace("[silence]", "")
+            .replace("(silence)", "")
+            .replace("[ Pause ]", "")
+            .trim()
+            .to_owned();
+
         if segment.is_empty() {
             return Ok(None);
         }
-        
+
         let start_ts = state.whisper_state.full_get_segment_t0(0).unwrap();
         let end_ts = state.whisper_state.full_get_segment_t1(0).unwrap();
-        
+
         gstreamer::info!(CAT, "{}", segment);
-        
+
         let segment = format!("{}\n", segment);
         let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
         buffer_mut.set_pts(
             chunk
-            .start_pts
-            .checked_add(ClockTime::from_mseconds(start_ts as u64 * 10))
-            .unwrap(),
+                .start_pts
+                .checked_add(ClockTime::from_mseconds(start_ts as u64 * 10))
+                .unwrap(),
         );
         buffer_mut.set_duration(ClockTime::from_mseconds(
             (end_ts as u64 - start_ts as u64) * 10,
         ));
-        buffer_mut.copy_from_slice(0, segment.as_bytes()).map_err(|_| FlowError::Error)?;
-        
+        buffer_mut
+            .copy_from_slice(0, segment.as_bytes())
+            .map_err(|_| FlowError::Error)?;
+
         Ok(Some(buffer))
     }
 }
@@ -201,9 +207,9 @@ impl WhisperFilter {
 impl ObjectSubclass for WhisperFilter {
     type ParentType = BaseTransform;
     type Type = super::WhisperFilter;
-    
+
     const NAME: &'static str = "GstWhisperFilter";
-    
+
     fn new() -> Self {
         Self {
             settings: Mutex::new(Settings {
@@ -221,7 +227,6 @@ impl ObjectSubclass for WhisperFilter {
 
 /// Implementation of GObject's ObjectImpl trait for WhisperFilter.
 impl ObjectImpl for WhisperFilter {
-    
     /// Returns an array of ParamSpecs for the properties of the WhisperFilter.
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
@@ -232,7 +237,7 @@ impl ObjectImpl for WhisperFilter {
             .mutable_ready()
             .mutable_paused()
             .mutable_playing()
-            .build(),   
+            .build(),
             glib::ParamSpecString::builder("vad-mode")
             .nick("VAD mode")
             .blurb(&format!("The aggressiveness of voice detection. Defaults to '{}'. Other options are 'low-bitrate', 'aggressive' and 'very-aggressive'.", DEFAULT_VAD_MODE))
@@ -272,7 +277,7 @@ impl ObjectImpl for WhisperFilter {
         });
         PROPERTIES.as_ref()
     }
-    
+
     /// Sets the value of a property of the WhisperFilter.
     fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
         let mut settings = self.settings.lock().unwrap();
@@ -298,7 +303,7 @@ impl ObjectImpl for WhisperFilter {
             other => panic!("no such property: {}", other),
         }
     }
-    
+
     /// Gets the value of a property of the WhisperFilter.
     fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
         let settings = self.settings.lock().unwrap();
@@ -318,7 +323,6 @@ impl GstObjectImpl for WhisperFilter {}
 
 /// Implementation of the `ElementImpl` trait for the `WhisperFilter` struct.
 impl ElementImpl for WhisperFilter {
-    
     /// Returns the metadata of the element.
     fn metadata() -> Option<&'static ElementMetadata> {
         static ELEMENT_METADATA: Lazy<ElementMetadata> = Lazy::new(|| {
@@ -329,16 +333,16 @@ impl ElementImpl for WhisperFilter {
                 "Jasper Hugo <jasper@avstack.io>",
             )
         });
-        
+
         Some(&*ELEMENT_METADATA)
     }
-    
+
     /// Returns the pad templates of the element.
     fn pad_templates() -> &'static [PadTemplate] {
         static PAD_TEMPLATES: Lazy<Vec<PadTemplate>> = Lazy::new(|| {
             let src_pad_template =
-            PadTemplate::new("src", PadDirection::Src, PadPresence::Always, &SRC_CAPS).unwrap();
-            
+                PadTemplate::new("src", PadDirection::Src, PadPresence::Always, &SRC_CAPS).unwrap();
+
             let sink_pad_template = gstreamer::PadTemplate::new(
                 "sink",
                 gstreamer::PadDirection::Sink,
@@ -346,10 +350,10 @@ impl ElementImpl for WhisperFilter {
                 &SINK_CAPS,
             )
             .unwrap();
-            
+
             vec![src_pad_template, sink_pad_template]
         });
-        
+
         PAD_TEMPLATES.as_ref()
     }
 }
@@ -359,12 +363,12 @@ impl WhisperFilter {
     /// Reads the audio samples from the given buffer and returns them as a vector of signed 16-bit integers.
     fn read_samples(&self, buffer: &Buffer) -> Result<Vec<i16>, FlowError> {
         let buffer_reader = buffer
-        .as_ref()
-        .map_readable()
-        .map_err(|_| FlowError::Error)?;
+            .as_ref()
+            .map_readable()
+            .map_err(|_| FlowError::Error)?;
         let samples = buffer_reader.as_slice_of().map_err(|_| FlowError::Error)?;
         gstreamer::debug!(CAT, "reading {} samples", samples.len());
-        
+
         Ok(samples.to_vec())
     }
     /// Creates a new buffer for voice activity detection (VAD) based on the given samples.
@@ -398,16 +402,16 @@ impl WhisperFilter {
             state.chunk = Some(Chunk {
                 start_pts: buffer.pts().unwrap(),
                 buffer: state
-                .prev_buffer
-                .drain(..)
-                .chain(samples.iter().copied())
-                .collect(),
+                    .prev_buffer
+                    .drain(..)
+                    .chain(samples.iter().copied())
+                    .collect(),
             });
         }
-        
+
         Ok(GenerateOutputSuccess::NoOutput)
     }
-    /// Handles the end of voice activity by storing the previous buffer, checking if there is a chunk of audio to process, and running the model on the chunk if it exists. 
+    /// Handles the end of voice activity by storing the previous buffer, checking if there is a chunk of audio to process, and running the model on the chunk if it exists.
     /// If the duration of the voice activity is less than the minimum voice activity duration, the function discards the voice activity and returns `GenerateOutputSuccess::NoOutput`.
     fn handle_voice_activity_end(
         &self,
@@ -416,7 +420,7 @@ impl WhisperFilter {
         buffer: &Buffer,
     ) -> Result<GenerateOutputSuccess, FlowError> {
         state.prev_buffer = samples.to_vec();
-        
+
         if let Some(chunk) = state.chunk.take() {
             gstreamer::info!(CAT, "voice activity ended");
             let min_voice_activity_ms = self.settings.lock().unwrap().min_voice_activity_ms;
@@ -425,34 +429,32 @@ impl WhisperFilter {
                 Ok(maybe_buffer
                     .map(GenerateOutputSuccess::Buffer)
                     .unwrap_or(GenerateOutputSuccess::NoOutput))
-                } else {
-                    gstreamer::warning!(
-                        CAT,
-                        "discarding voice activity < {}ms",
-                        min_voice_activity_ms
-                    );
-                    Ok(GenerateOutputSuccess::NoOutput)
-                }
             } else {
+                gstreamer::warning!(
+                    CAT,
+                    "discarding voice activity < {}ms",
+                    min_voice_activity_ms
+                );
                 Ok(GenerateOutputSuccess::NoOutput)
             }
+        } else {
+            Ok(GenerateOutputSuccess::NoOutput)
         }
+    }
     /// Handles end-of-stream event by running the model on the last audio chunk and pushing the output buffer to the source pad.
-    fn handle_eos(
-        &self,
-        state: &mut State
-    ) {
-            if let Some(chunk) = state.chunk.take() {
-                gstreamer::info!(CAT, "voice activity ended");
-                let maybe_buffer = self.run_model(state, chunk);
-                let srcpad = self.obj().static_pad("src").unwrap();
-                if let Ok(Some(buffer)) = maybe_buffer {
-                    let _ = srcpad.push(buffer);
-                }
-            } 
+    fn handle_eos(&self, state: &mut State) {
+        if let Some(chunk) = state.chunk.take() {
+            gstreamer::info!(CAT, "voice activity ended");
+            let maybe_buffer = self.run_model(state, chunk);
+            let srcpad = self.obj().static_pad("src").unwrap();
+            if let Ok(Some(buffer)) = maybe_buffer {
+                let _ = srcpad.push(buffer);
+            }
         }
+    }
 }
-    
+
+/// Implementation of the `BaseTransformImpl` trait for the `WhisperFilter` struct.    
 impl BaseTransformImpl for WhisperFilter {
     const MODE: BaseTransformMode = BaseTransformMode::NeverInPlace;
     const PASSTHROUGH_ON_SAME_CAPS: bool = false;
@@ -467,33 +469,35 @@ impl BaseTransformImpl for WhisperFilter {
             "very-aggressive" => VadMode::VeryAggressive,
             other => panic!("invalid VAD mode: {}", other),
         };
-        
+
         let use_vad = self.settings.lock().unwrap().use_vad;
-        
+
         if use_vad {
             *self.state.lock().unwrap() = Some(State {
                 whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
                 voice_activity_detector: Some(vad::VoiceActivityDetector::new(vad_mode)),
                 chunk: None,
-                prev_buffer: Vec::new(),}) 
-            } else {
-                *self.state.lock().unwrap() = Some(State {
-                    whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
-                    voice_activity_detector: None,
-                    chunk: None,
-                    prev_buffer: Vec::new(),}) 
-                }
-                gstreamer::debug!(CAT, "started");
-                Ok(())
-            }
-            
+                prev_buffer: Vec::new(),
+            })
+        } else {
+            *self.state.lock().unwrap() = Some(State {
+                whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
+                voice_activity_detector: None,
+                chunk: None,
+                prev_buffer: Vec::new(),
+            })
+        }
+        gstreamer::debug!(CAT, "started");
+        Ok(())
+    }
+
     fn stop(&self) -> Result<(), ErrorMessage> {
-                gstreamer::debug!(CAT, "stopping");
-                let _ = self.state.lock().unwrap().take();
-                gstreamer::debug!(CAT, "stopped");
-                Ok(())
-            }
-            
+        gstreamer::debug!(CAT, "stopping");
+        let _ = self.state.lock().unwrap().take();
+        gstreamer::debug!(CAT, "stopped");
+        Ok(())
+    }
+
     fn transform_caps(
         &self,
         direction: PadDirection,
@@ -510,7 +514,7 @@ impl BaseTransformImpl for WhisperFilter {
         }
         Some(caps)
     }
-    
+
     fn generate_output(&self) -> Result<GenerateOutputSuccess, FlowError> {
         if let Some(buffer) = self.take_queued_buffer() {
             let mut locked_state = self.state.lock().unwrap();
@@ -537,9 +541,9 @@ impl BaseTransformImpl for WhisperFilter {
             } else {
                 if let Some(chunk) = state.chunk.as_mut() {
                     if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= DEFAULT_LENGTH_MS {
-                        return self.handle_voice_activity_end(state, &samples, &buffer)
-                    } 
-                } 
+                        return self.handle_voice_activity_end(state, &samples, &buffer);
+                    }
+                }
                 return self.handle_voice_activity(state, &samples, &buffer);
             }
         } else {
@@ -547,15 +551,14 @@ impl BaseTransformImpl for WhisperFilter {
             Ok(GenerateOutputSuccess::NoOutput)
         }
     }
-    
+
     fn sink_event(&self, event: gstreamer::Event) -> bool {
-                    if let EventView::Eos(_) = event.view() {
-                        gstreamer::info!(CAT, imp: self, "Handling EOS");
-                        let mut locked_state = self.state.lock().unwrap();
-                        let state = locked_state.as_mut().unwrap();
-                        self.handle_eos(state);
-                    }
-                    self.parent_sink_event(event)
-                }
+        if let EventView::Eos(_) = event.view() {
+            gstreamer::info!(CAT, imp: self, "Handling EOS");
+            let mut locked_state = self.state.lock().unwrap();
+            let state = locked_state.as_mut().unwrap();
+            self.handle_eos(state);
+        }
+        self.parent_sink_event(event)
+    }
 }
-            
