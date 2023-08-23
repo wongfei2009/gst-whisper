@@ -130,19 +130,6 @@ impl WhisperFilter {
         params
     }
     /// Runs the whisper model on the given audio chunk and returns the resulting text segment as a buffer.
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - A mutable reference to the current state of the whisper filter.
-    /// * `chunk` - The audio chunk to run the model on.
-    ///
-    /// # Returns
-    ///
-    /// Returns a Result containing an optional Buffer. If the model produces a text segment, it is returned as a Some(Buffer). Otherwise, None is returned.
-    ///
-    /// # Errors
-    ///
-    /// Returns a FlowError if there is an error creating the buffer.
     fn run_model(&self, state: &mut State, chunk: Chunk) -> Result<Option<Buffer>, FlowError> {
         let samples = convert_integer_to_float_audio(&chunk.buffer);
 
@@ -413,7 +400,7 @@ impl WhisperFilter {
     }
     /// Handles the end of voice activity by storing the previous buffer, checking if there is a chunk of audio to process, and running the model on the chunk if it exists.
     /// If the duration of the voice activity is less than the minimum voice activity duration, the function discards the voice activity and returns `GenerateOutputSuccess::NoOutput`.
-    fn handle_voice_activity_end(
+    fn handle_voice_activity_boundary(
         &self,
         state: &mut State,
         samples: &[i16],
@@ -460,6 +447,7 @@ impl BaseTransformImpl for WhisperFilter {
     const PASSTHROUGH_ON_SAME_CAPS: bool = false;
     const TRANSFORM_IP_ON_PASSTHROUGH: bool = false;
 
+    /// Starts the filter with the specified settings. 
     fn start(&self) -> Result<(), ErrorMessage> {
         gstreamer::debug!(CAT, "starting");
         let vad_mode = match self.settings.lock().unwrap().vad_mode.as_str() {
@@ -491,6 +479,7 @@ impl BaseTransformImpl for WhisperFilter {
         Ok(())
     }
 
+    /// Stops the filter.
     fn stop(&self) -> Result<(), ErrorMessage> {
         gstreamer::debug!(CAT, "stopping");
         let _ = self.state.lock().unwrap().take();
@@ -498,6 +487,7 @@ impl BaseTransformImpl for WhisperFilter {
         Ok(())
     }
 
+    /// Transforms the given caps based on the direction and an optional filter.
     fn transform_caps(
         &self,
         direction: PadDirection,
@@ -515,6 +505,13 @@ impl BaseTransformImpl for WhisperFilter {
         Some(caps)
     }
 
+    /// This function generates output from the filter. 
+    /// It reads samples from the queued buffer and handles voice activity based on the settings. 
+    /// If the `use_vad` setting is enabled, it uses the voice activity detector to determine if the buffer contains a voice segment. 
+    /// If a voice segment is detected, it calls `handle_voice_activity` to handle the segment. 
+    /// If not, it calls `handle_voice_activity_boundary` to handle the boundary of the voice activity. 
+    /// If `use_vad` is disabled, it checks if the buffer is long enough to be considered a voice segment and calls the appropriate function. 
+    /// If there are no queued buffers, it returns `GenerateOutputSuccess::NoOutput`.
     fn generate_output(&self) -> Result<GenerateOutputSuccess, FlowError> {
         if let Some(buffer) = self.take_queued_buffer() {
             let mut locked_state = self.state.lock().unwrap();
@@ -537,11 +534,11 @@ impl BaseTransformImpl for WhisperFilter {
                         }
                     }
                 }
-                self.handle_voice_activity_end(state, &samples, &buffer)
+                self.handle_voice_activity_boundary(state, &samples, &buffer)
             } else {
                 if let Some(chunk) = state.chunk.as_mut() {
                     if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= DEFAULT_LENGTH_MS {
-                        return self.handle_voice_activity_end(state, &samples, &buffer);
+                        return self.handle_voice_activity_boundary(state, &samples, &buffer);
                     }
                 }
                 return self.handle_voice_activity(state, &samples, &buffer);
@@ -552,6 +549,7 @@ impl BaseTransformImpl for WhisperFilter {
         }
     }
 
+    /// Handle sink events, such as EOS (end-of-stream) events.
     fn sink_event(&self, event: gstreamer::Event) -> bool {
         if let EventView::Eos(_) = event.view() {
             gstreamer::info!(CAT, imp: self, "Handling EOS");
