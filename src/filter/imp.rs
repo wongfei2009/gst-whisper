@@ -30,7 +30,6 @@ use whisper_rs::{
 };
 
 const SAMPLE_RATE: usize = 16_000;
-
 const DEFAULT_USE_VAD: bool = true;
 const DEFAULT_VAD_MODE: &str = "quality";
 const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 200;
@@ -39,11 +38,16 @@ const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
 const DEFAULT_LENGTH_MS: u64 = 10000;
 
+/// A static variable that holds a lazy-initialized `WhisperContext` instance.
+/// The `WhisperContext` instance is created using the path specified in the `WHISPER_MODEL_PATH` environment variable.
 static WHISPER_CONTEXT: Lazy<WhisperContext> = Lazy::new(|| {
     let path = env::var("WHISPER_MODEL_PATH").unwrap();
     WhisperContext::new(&path).unwrap()
 });
 
+/// This static variable represents a lazy-initialized `DebugCategory` instance
+/// for the "whisper" category. It is used for logging purposes in the `SpeechToTextFilter`
+/// implementation, which uses the Whisper speech recognition engine.
 static CAT: Lazy<DebugCategory> = Lazy::new(|| {
     DebugCategory::new(
         "whisper",
@@ -64,6 +68,7 @@ static SINK_CAPS: Lazy<Caps> = Lazy::new(|| {
 static SRC_CAPS: Lazy<Caps> =
     Lazy::new(|| Caps::builder("text/x-raw").field("format", "utf8").build());
 
+/// Struct representing the settings for the whisper filter.
 struct Settings {
     use_vad: bool,
     vad_mode: String,
@@ -73,26 +78,34 @@ struct Settings {
     context: bool,
 }
 
+/// Struct representing the state of the whisper filter.
 struct State {
+    /// The state of the whisper filter.
     whisper_state: WhisperState<'static>,
+    /// The voice activity detector used to detect speech.
     voice_activity_detector: Option<vad::VoiceActivityDetector>,
+    /// The current audio chunk being processed.
     chunk: Option<Chunk>,
+    /// The previous audio buffer.
     prev_buffer: Vec<i16>,
 }
 
+/// A struct representing an audio chunk with its starting presentation timestamp and buffer.
 struct Chunk {
     start_pts: ClockTime,
     buffer: Vec<i16>,
 }
 
+/// A struct representing a WhisperFilter.
 pub struct WhisperFilter {
     #[allow(dead_code)]
+    /// A mutex-protected struct containing the filter's settings.
     settings: Mutex<Settings>,
+    /// A mutex-protected option containing the filter's state.
     state: Mutex<Option<State>>,
 }
 
 impl WhisperFilter {
-    // Create a new set of parameters for the Whisper model.
     fn whisper_params(&self) -> FullParams {
         let mut params = FullParams::new(SamplingStrategy::default());
         params.set_print_progress(false);
@@ -114,9 +127,6 @@ impl WhisperFilter {
         }
         params
     }
-
-    // Run the model on the given chunk of audio samples.  Returns the text
-    // output of the model, if any.
     fn run_model(&self, state: &mut State, chunk: Chunk) -> Result<Option<Buffer>, FlowError> {
         let samples = convert_integer_to_float_audio(&chunk.buffer);
 
