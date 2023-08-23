@@ -106,6 +106,7 @@ pub struct WhisperFilter {
 }
 
 impl WhisperFilter {
+    /// Returns the full parameters of the whisper filter.
     fn whisper_params(&self) -> FullParams {
         let mut params = FullParams::new(SamplingStrategy::default());
         params.set_print_progress(false);
@@ -127,61 +128,66 @@ impl WhisperFilter {
         }
         params
     }
+    /// Runs the whisper model on the given audio chunk and returns the resulting text segment as a buffer.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `state` - A mutable reference to the current state of the whisper filter.
+    /// * `chunk` - The audio chunk to run the model on.
+    /// 
+    /// # Returns
+    /// 
+    /// Returns a Result containing an optional Buffer. If the model produces a text segment, it is returned as a Some(Buffer). Otherwise, None is returned.
+    /// 
+    /// # Errors
+    /// 
+    /// Returns a FlowError if there is an error creating the buffer.
     fn run_model(&self, state: &mut State, chunk: Chunk) -> Result<Option<Buffer>, FlowError> {
         let samples = convert_integer_to_float_audio(&chunk.buffer);
 
         let start = Instant::now();
-        state
-            .whisper_state
-            .full(self.whisper_params(), &samples)
-            .unwrap();
+        state.whisper_state.full(self.whisper_params(), &samples).unwrap();
         gstreamer::debug!(CAT, "model took {:?}", start.elapsed());
 
         let n_segments = state.whisper_state.full_n_segments().unwrap();
-        if n_segments > 0 {
-            if let Ok(segment) = state.whisper_state.full_get_segment_text(0) {
-                let segment = segment
-                    .replace("[BLANK_AUDIO]", "")
-                    .replace("[ Silence ]", "")
-                    .replace("[silence]", "")
-                    .replace("(silence)", "")
-                    .replace("[ Pause ]", "")
-                    .trim()
-                    .to_owned();
-
-                if !segment.is_empty() {
-                    let start_ts = state.whisper_state.full_get_segment_t0(0).unwrap();
-                    let end_ts = state.whisper_state.full_get_segment_t1(0).unwrap();
-
-                    gstreamer::info!(CAT, "{}", segment);
-
-                    let segment = format!("{}\n", segment);
-                    let mut buffer =
-                        Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
-                    let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
-                    buffer_mut.set_pts(
-                        chunk
-                            .start_pts
-                            .checked_add(ClockTime::from_mseconds(start_ts as u64 * 10))
-                            .unwrap(),
-                    );
-                    buffer_mut.set_duration(ClockTime::from_mseconds(
-                        (end_ts as u64 - start_ts as u64) * 10,
-                    ));
-                    buffer_mut
-                        .copy_from_slice(0, segment.as_bytes())
-                        .map_err(|_| FlowError::Error)?;
-
-                    Ok(Some(buffer))
-                } else {
-                    Ok(None)
-                }
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
+        if n_segments == 0 {
+            return Ok(None);
         }
+
+        let segment = state.whisper_state.full_get_segment_text(0).ok().unwrap();
+        let segment = segment
+            .replace("[BLANK_AUDIO]", "")
+            .replace("[ Silence ]", "")
+            .replace("[silence]", "")
+            .replace("(silence)", "")
+            .replace("[ Pause ]", "")
+            .trim()
+            .to_owned();
+
+        if segment.is_empty() {
+            return Ok(None);
+        }
+
+        let start_ts = state.whisper_state.full_get_segment_t0(0).unwrap();
+        let end_ts = state.whisper_state.full_get_segment_t1(0).unwrap();
+
+        gstreamer::info!(CAT, "{}", segment);
+
+        let segment = format!("{}\n", segment);
+        let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
+        let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
+        buffer_mut.set_pts(
+            chunk
+                .start_pts
+                .checked_add(ClockTime::from_mseconds(start_ts as u64 * 10))
+                .unwrap(),
+        );
+        buffer_mut.set_duration(ClockTime::from_mseconds(
+            (end_ts as u64 - start_ts as u64) * 10,
+        ));
+        buffer_mut.copy_from_slice(0, segment.as_bytes()).map_err(|_| FlowError::Error)?;
+
+        Ok(Some(buffer))
     }
 }
 
@@ -192,7 +198,6 @@ impl ObjectSubclass for WhisperFilter {
 
     const NAME: &'static str = "GstWhisperFilter";
 
-    // Create a new instance of the filter
     fn new() -> Self {
         Self {
             settings: Mutex::new(Settings {
@@ -209,7 +214,7 @@ impl ObjectSubclass for WhisperFilter {
 }
 
 impl ObjectImpl for WhisperFilter {
-    // Add properties for the filter
+   
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
             vec![
@@ -259,7 +264,7 @@ impl ObjectImpl for WhisperFilter {
         });
         PROPERTIES.as_ref()
     }
-    // Set the value of a property
+    
     fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
         let mut settings = self.settings.lock().unwrap();
         match pspec.name() {
@@ -284,7 +289,7 @@ impl ObjectImpl for WhisperFilter {
             other => panic!("no such property: {}", other),
         }
     }
-    // Get the value of a property
+    
     fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
         let settings = self.settings.lock().unwrap();
         match pspec.name() {
@@ -301,7 +306,7 @@ impl ObjectImpl for WhisperFilter {
 impl GstObjectImpl for WhisperFilter {}
 
 impl ElementImpl for WhisperFilter {
-    //  Add metadata for the filter
+    
     fn metadata() -> Option<&'static ElementMetadata> {
         static ELEMENT_METADATA: Lazy<ElementMetadata> = Lazy::new(|| {
             ElementMetadata::new(
@@ -314,7 +319,7 @@ impl ElementImpl for WhisperFilter {
 
         Some(&*ELEMENT_METADATA)
     }
-    // Add pads for the filter
+    
     fn pad_templates() -> &'static [PadTemplate] {
         static PAD_TEMPLATES: Lazy<Vec<PadTemplate>> = Lazy::new(|| {
             let src_pad_template =
@@ -336,7 +341,6 @@ impl ElementImpl for WhisperFilter {
 }
 
 impl WhisperFilter {
-    // Read the samples from the given buffer
     fn read_samples(&self, buffer: &Buffer) -> Result<Vec<i16>, FlowError> {
         let buffer_reader = buffer
             .as_ref()
@@ -347,19 +351,14 @@ impl WhisperFilter {
 
         Ok(samples.to_vec())
     }
-    // Create a new buffer for the voice activity detector
     fn new_vad_buffer(&self, samples: &[i16]) -> Option<Vec<i16>> {
-        // Check the length of the buffer to determine if there is voice activity
         let buffer_len = samples.len();
         if buffer_len >= 160 {
             let vad_buffer = if buffer_len >= 480 {
-                // If the buffer is longer than 480 samples, use the first 480 samples
                 &samples[0..480]
             } else if buffer_len >= 320 {
-                // If the buffer is longer than 320 samples, use the first 320 samples
                 &samples[0..320]
             } else {
-                // Otherwise, use the first 160 samples
                 &samples[0..160]
             };
             Some(vad_buffer.to_vec())
