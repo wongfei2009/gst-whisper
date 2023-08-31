@@ -20,6 +20,8 @@
                 "!",
                 "textrender",
                 "!",
+                "videoconvert",
+                "!",
                 "autovideosink"
             ],
             "cwd": "${workspaceFolder}",
