@@ -110,11 +110,11 @@ impl WhisperFilter {
     /// Returns the full parameters of the whisper filter.
     fn whisper_params(&self) -> FullParams {
         let mut params = FullParams::new(SamplingStrategy::default());
+
         params.set_print_progress(false);
         params.set_print_special(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        params.set_single_segment(true);
         params.set_suppress_blank(true);
         params.set_suppress_non_speech_tokens(true);
         {
@@ -144,45 +144,40 @@ impl WhisperFilter {
         if n_segments == 0 {
             return Ok(None);
         }
+        let mut duration = 0; 
+        let mut transcribed_text = String::new();
+        for i in 0..n_segments {
+            let segment = state.whisper_state.full_get_segment_text(i).ok().unwrap();
+            let segment = segment
+                .replace("[BLANK_AUDIO]", "")
+                .replace("[ Silence ]", "")
+                .replace("[silence]", "")
+                .replace("(silence)", "")
+                .replace("[ Pause ]", "")
+                .trim()
+                .to_owned();
 
-        let segment = state.whisper_state.full_get_segment_text(0).ok().unwrap();
-        let segment = segment
-            .replace("[BLANK_AUDIO]", "")
-            .replace("[ Silence ]", "")
-            .replace("[silence]", "")
-            .replace("(silence)", "")
-            .replace("[ Pause ]", "")
-            .trim()
-            .to_owned();
+            let start_ts = state.whisper_state.full_get_segment_t0(i).unwrap();
+            let end_ts = state.whisper_state.full_get_segment_t1(i).unwrap();
 
-        if segment.is_empty() {
-            return Ok(None);
+            let segment = format!("{}\n", segment);
+            transcribed_text.push_str(&segment);
+            duration += duration + (end_ts as u64 - start_ts as u64) * 10;
         }
-
-        let start_ts = state.whisper_state.full_get_segment_t0(0).unwrap();
-        let end_ts = state.whisper_state.full_get_segment_t1(0).unwrap();
-
-        let segment = format!("{}\n", segment);
-        let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
+        let mut buffer = Buffer::with_size(transcribed_text.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
-        buffer_mut.set_pts(
-            chunk
-                .start_pts,
-        );
-        buffer_mut.set_duration(ClockTime::from_mseconds(
-            (end_ts as u64 - start_ts as u64) * 10,
-        ));
+        buffer_mut.set_pts(chunk.start_pts);
+        buffer_mut.set_duration(ClockTime::from_mseconds(duration));
         buffer_mut
-            .copy_from_slice(0, segment.as_bytes())
-            .map_err(|_| FlowError::Error)?;
-
-        //add debug message for buffer start pts and duration
+                .copy_from_slice(0, transcribed_text.as_bytes())
+                .map_err(|_| FlowError::Error)?;
+        
         gstreamer::info!(
             CAT,
             "Start pts: {:?}, duration: {:?}, text: {:?}",
             buffer.pts().unwrap(),
             buffer.duration().unwrap(),
-            segment
+            transcribed_text
         );
         Ok(Some(buffer))
     }
