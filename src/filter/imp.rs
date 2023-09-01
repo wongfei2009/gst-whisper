@@ -295,6 +295,7 @@ impl ObjectImpl for WhisperFilter {
     fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
         let settings = self.settings.lock().unwrap();
         match pspec.name() {
+            "use-vad" => settings.use_vad.to_value(),
             "vad-mode" => settings.vad_mode.to_value(),
             "min-voice-activity-ms" => settings.min_voice_activity_ms.to_value(),
             "language" => settings.language.to_value(),
