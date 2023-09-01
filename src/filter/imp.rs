@@ -162,8 +162,6 @@ impl WhisperFilter {
         let start_ts = state.whisper_state.full_get_segment_t0(0).unwrap();
         let end_ts = state.whisper_state.full_get_segment_t1(0).unwrap();
 
-        gstreamer::info!(CAT, "{}", segment);
-
         let segment = format!("{}\n", segment);
         let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
@@ -180,6 +178,14 @@ impl WhisperFilter {
             .copy_from_slice(0, segment.as_bytes())
             .map_err(|_| FlowError::Error)?;
 
+        //add debug message for buffer start pts and duration
+        gstreamer::info!(
+            CAT,
+            "Start pts: {:?}, duration: {:?}, text: {:?}",
+            buffer.pts().unwrap(),
+            buffer.duration().unwrap(),
+            segment
+        );
         Ok(Some(buffer))
     }
 }
