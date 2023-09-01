@@ -162,7 +162,7 @@ impl WhisperFilter {
 
             let segment = format!("{}\n", segment);
             transcribed_text.push_str(&segment);
-            duration += duration + (end_ts as u64 - start_ts as u64) * 10;
+            duration = duration + (end_ts as u64 - start_ts as u64) * 10;
         }
         let mut buffer = Buffer::with_size(transcribed_text.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
