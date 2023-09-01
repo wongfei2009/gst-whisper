@@ -16,7 +16,7 @@ gstreamer-base = { version = "0.20", default-features = false }
 once_cell = { version = "1", default-features = false, features = ["std"] }
 ringbuf = { version = "0.3", default-features = false, features = ["std"] }
 webrtc-vad = { version = "0.4", default-features = false }
-whisper-rs = { version = "0.8", default-features = false }
+whisper-rs = { version = "0.8", git="https://github.com/tazz4843/whisper-rs", default-features = false }
 
 [dev-dependencies]
 gstreamer-check = { version = "0.20", default-features = false }

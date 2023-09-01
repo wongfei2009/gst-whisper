@@ -167,9 +167,7 @@ impl WhisperFilter {
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
         buffer_mut.set_pts(
             chunk
-                .start_pts
-                .checked_add(ClockTime::from_mseconds(start_ts as u64 * 10))
-                .unwrap(),
+                .start_pts,
         );
         buffer_mut.set_duration(ClockTime::from_mseconds(
             (end_ts as u64 - start_ts as u64) * 10,
