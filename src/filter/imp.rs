@@ -31,13 +31,11 @@ use whisper_rs::{
 };
 
 const SAMPLE_RATE: usize = 16_000;
-const DEFAULT_USE_VAD: bool = true;
 const DEFAULT_VAD_MODE: &str = "quality";
 const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 200;
 const DEFAULT_LANGUAGE: &str = "en";
 const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
-const DEFAULT_LENGTH_MS: u64 = 10000;
 
 /// A static variable that holds a lazy-initialized `WhisperContext` instance.
 /// The `WhisperContext` instance is created using the path specified in the `WHISPER_MODEL_PATH` environment variable.
@@ -71,7 +69,6 @@ static SRC_CAPS: Lazy<Caps> =
 
 /// Struct representing the settings for the whisper filter.
 struct Settings {
-    use_vad: bool,
     vad_mode: String,
     min_voice_activity_ms: u64,
     language: String,
@@ -144,7 +141,7 @@ impl WhisperFilter {
         if n_segments == 0 {
             return Ok(None);
         }
-        let mut duration = 0; 
+        let mut duration = 0;
         let mut transcribed_text = String::new();
         for i in 0..n_segments {
             let segment = state.whisper_state.full_get_segment_text(i).ok().unwrap();
@@ -169,9 +166,9 @@ impl WhisperFilter {
         buffer_mut.set_pts(chunk.start_pts);
         buffer_mut.set_duration(ClockTime::from_mseconds(duration));
         buffer_mut
-                .copy_from_slice(0, transcribed_text.as_bytes())
-                .map_err(|_| FlowError::Error)?;
-        
+            .copy_from_slice(0, transcribed_text.as_bytes())
+            .map_err(|_| FlowError::Error)?;
+
         gstreamer::info!(
             CAT,
             "Start pts: {:?}, duration: {:?}, text: {:?}",
@@ -199,7 +196,6 @@ impl ObjectSubclass for WhisperFilter {
     fn new() -> Self {
         Self {
             settings: Mutex::new(Settings {
-                use_vad: DEFAULT_USE_VAD,
                 vad_mode: DEFAULT_VAD_MODE.into(),
                 min_voice_activity_ms: DEFAULT_MIN_VOICE_ACTIVITY_MS,
                 language: DEFAULT_LANGUAGE.into(),
@@ -217,13 +213,6 @@ impl ObjectImpl for WhisperFilter {
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
             vec![
-            glib::ParamSpecBoolean::builder("use-vad")
-            .nick("Use VAD")
-            .blurb(&format!("Whether to use VAD. Defaults to {}.", DEFAULT_USE_VAD))
-            .mutable_ready()
-            .mutable_paused()
-            .mutable_playing()
-            .build(),
             glib::ParamSpecString::builder("vad-mode")
             .nick("VAD mode")
             .blurb(&format!("The aggressiveness of voice detection. Defaults to '{}'. Other options are 'low-bitrate', 'aggressive' and 'very-aggressive'.", DEFAULT_VAD_MODE))
@@ -268,9 +257,6 @@ impl ObjectImpl for WhisperFilter {
     fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
         let mut settings = self.settings.lock().unwrap();
         match pspec.name() {
-            "use-vad" => {
-                settings.use_vad = value.get().unwrap();
-            }
             "vad-mode" => {
                 settings.vad_mode = value.get().unwrap();
             }
@@ -294,7 +280,6 @@ impl ObjectImpl for WhisperFilter {
     fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
         let settings = self.settings.lock().unwrap();
         match pspec.name() {
-            "use-vad" => settings.use_vad.to_value(),
             "vad-mode" => settings.vad_mode.to_value(),
             "min-voice-activity-ms" => settings.min_voice_activity_ms.to_value(),
             "language" => settings.language.to_value(),
@@ -447,7 +432,7 @@ impl BaseTransformImpl for WhisperFilter {
     const PASSTHROUGH_ON_SAME_CAPS: bool = false;
     const TRANSFORM_IP_ON_PASSTHROUGH: bool = false;
 
-    /// Starts the filter with the specified settings. 
+    /// Starts the filter with the specified settings.
     fn start(&self) -> Result<(), ErrorMessage> {
         gstreamer::debug!(CAT, "starting");
         let vad_mode = match self.settings.lock().unwrap().vad_mode.as_str() {
@@ -458,23 +443,13 @@ impl BaseTransformImpl for WhisperFilter {
             other => panic!("invalid VAD mode: {}", other),
         };
 
-        let use_vad = self.settings.lock().unwrap().use_vad;
+        *self.state.lock().unwrap() = Some(State {
+            whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
+            voice_activity_detector: Some(vad::VoiceActivityDetector::new(vad_mode)),
+            chunk: None,
+            prev_buffer: Vec::new(),
+        });
 
-        if use_vad {
-            *self.state.lock().unwrap() = Some(State {
-                whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
-                voice_activity_detector: Some(vad::VoiceActivityDetector::new(vad_mode)),
-                chunk: None,
-                prev_buffer: Vec::new(),
-            })
-        } else {
-            *self.state.lock().unwrap() = Some(State {
-                whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
-                voice_activity_detector: None,
-                chunk: None,
-                prev_buffer: Vec::new(),
-            })
-        }
         gstreamer::debug!(CAT, "started");
         Ok(())
     }
@@ -505,12 +480,11 @@ impl BaseTransformImpl for WhisperFilter {
         Some(caps)
     }
 
-    /// This function generates output from the filter. 
-    /// It reads samples from the queued buffer and handles voice activity based on the settings. 
-    /// If the `use_vad` setting is enabled, it uses the voice activity detector to determine if the buffer contains a voice segment. 
-    /// If a voice segment is detected, it calls `handle_voice_activity` to handle the segment. 
-    /// If not, it calls `handle_voice_activity_boundary` to handle the boundary of the voice activity. 
-    /// If `use_vad` is disabled, it checks if the buffer is long enough to be considered a voice segment and calls the appropriate function. 
+    /// This function generates output from the filter.
+    /// It reads samples from the queued buffer and handles voice activity based on the settings.
+    /// It uses the voice activity detector to determine if the buffer contains a voice segment.
+    /// If a voice segment is detected, it calls `handle_voice_activity` to handle the segment.
+    /// If not, it calls `handle_voice_activity_boundary` to handle the boundary of the voice activity.
     /// If there are no queued buffers, it returns `GenerateOutputSuccess::NoOutput`.
     fn generate_output(&self) -> Result<GenerateOutputSuccess, FlowError> {
         if let Some(buffer) = self.take_queued_buffer() {
@@ -524,25 +498,15 @@ impl BaseTransformImpl for WhisperFilter {
                 FlowError::NotNegotiated
             })?;
             let samples = self.read_samples(&buffer)?;
-            let use_vad = self.settings.lock().unwrap().use_vad;
-            if use_vad {
-                let vad_buffer = self.new_vad_buffer(&samples);
-                if let Some(vad_buffer) = vad_buffer {
-                    if let Some(vad) = &state.voice_activity_detector {
-                        if vad.is_voice_segment(&vad_buffer).unwrap() {
-                            return self.handle_voice_activity(state, &samples, &buffer);
-                        }
+            let vad_buffer = self.new_vad_buffer(&samples);
+            if let Some(vad_buffer) = vad_buffer {
+                if let Some(vad) = &state.voice_activity_detector {
+                    if vad.is_voice_segment(&vad_buffer).unwrap() {
+                        return self.handle_voice_activity(state, &samples, &buffer);
                     }
                 }
-                self.handle_voice_activity_boundary(state, &samples, &buffer)
-            } else {
-                if let Some(chunk) = state.chunk.as_mut() {
-                    if (buffer.pts().unwrap() - chunk.start_pts).mseconds() >= DEFAULT_LENGTH_MS {
-                        return self.handle_voice_activity_boundary(state, &samples, &buffer);
-                    }
-                }
-                return self.handle_voice_activity(state, &samples, &buffer);
             }
+            self.handle_voice_activity_boundary(state, &samples, &buffer)
         } else {
             gstreamer::debug!(CAT, "no queued buffers to take");
             Ok(GenerateOutputSuccess::NoOutput)
