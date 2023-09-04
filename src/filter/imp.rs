@@ -32,7 +32,7 @@ use whisper_rs::{
 
 const SAMPLE_RATE: usize = 16_000;
 const DEFAULT_VAD_MODE: &str = "quality";
-const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 200;
+const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 40;
 const DEFAULT_LANGUAGE: &str = "en";
 const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
@@ -402,13 +402,6 @@ impl WhisperFilter {
                     .map(GenerateOutputSuccess::Buffer)
                     .unwrap_or(GenerateOutputSuccess::NoOutput))
             } else {
-                state.prev_buffer = chunk
-                    .buffer
-                    .iter()
-                    .copied()
-                    .chain(samples.iter().copied())
-                    .collect();
-
                 gstreamer::warning!(
                     CAT,
                     "discarding voice activity < {}ms",
