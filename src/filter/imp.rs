@@ -33,7 +33,7 @@ use whisper_rs::{
 const SAMPLE_RATE: usize = 16_000;
 const DEFAULT_VAD_MODE: &str = "quality";
 const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 40;
-const DEFAULT_LANGUAGE: &str = "en";
+const DEFAULT_LANGUAGE: &str = "auto";
 const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
 
