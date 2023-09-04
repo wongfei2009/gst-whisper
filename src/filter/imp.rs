@@ -402,6 +402,13 @@ impl WhisperFilter {
                     .map(GenerateOutputSuccess::Buffer)
                     .unwrap_or(GenerateOutputSuccess::NoOutput))
             } else {
+                state.prev_buffer = chunk
+                    .buffer
+                    .iter()
+                    .copied()
+                    .chain(samples.iter().copied())
+                    .collect();
+
                 gstreamer::warning!(
                     CAT,
                     "discarding voice activity < {}ms",
