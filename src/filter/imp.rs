@@ -171,10 +171,11 @@ impl WhisperFilter {
 
         gstreamer::info!(
             CAT,
-            "Start pts: {:?}, duration: {:?}, text: {:?}",
+            "Start pts: {:?}, duration: {:?}, text: {:?}, n_segments: {:?}",
             buffer.pts().unwrap(),
             buffer.duration().unwrap(),
-            transcribed_text
+            transcribed_text,
+            n_segments
         );
         Ok(Some(buffer))
     }
