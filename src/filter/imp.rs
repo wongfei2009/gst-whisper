@@ -90,6 +90,7 @@ struct State {
 
 /// A struct representing an audio chunk with its starting presentation timestamp and buffer.
 struct Chunk {
+    prev_buffer_size: usize,
     start_pts: ClockTime,
     buffer: Vec<i16>,
 }
@@ -141,7 +142,8 @@ impl WhisperFilter {
         if n_segments == 0 {
             return Ok(None);
         }
-        let mut duration = 0;
+        let duration =
+            (samples.len() as u64 - chunk.prev_buffer_size as u64) * 1000 / SAMPLE_RATE as u64;
         let mut transcribed_text = String::new();
         for i in 0..n_segments {
             let segment = state.whisper_state.full_get_segment_text(i).ok().unwrap();
@@ -154,12 +156,8 @@ impl WhisperFilter {
                 .trim()
                 .to_owned();
 
-            let start_ts = state.whisper_state.full_get_segment_t0(i).unwrap();
-            let end_ts = state.whisper_state.full_get_segment_t1(i).unwrap();
-
             let segment = format!("{}\n", segment);
             transcribed_text.push_str(&segment);
-            duration = duration + (end_ts as u64 - start_ts as u64) * 10;
         }
         let mut buffer = Buffer::with_size(transcribed_text.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
@@ -373,6 +371,7 @@ impl WhisperFilter {
         } else {
             gstreamer::debug!(CAT, "voice activity started");
             state.chunk = Some(Chunk {
+                prev_buffer_size: state.prev_buffer.len(),
                 start_pts: buffer.pts().unwrap(),
                 buffer: state
                     .prev_buffer
