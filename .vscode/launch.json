@@ -12,6 +12,8 @@
                 "!",
                 "decodebin",
                 "!",
+                "audiobuffersplit",
+                "!",
                 "audioconvert",
                 "!",
                 "queue",
