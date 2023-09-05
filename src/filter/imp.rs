@@ -33,6 +33,7 @@ use whisper_rs::{
 const SAMPLE_RATE: usize = 16_000;
 const DEFAULT_VAD_MODE: &str = "quality";
 const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 40;
+const DEFAULT_MAX_VOICE_ACTIVITY_MS: u64 = 10000;
 const DEFAULT_LANGUAGE: &str = "auto";
 const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
@@ -363,6 +364,16 @@ impl WhisperFilter {
     ) -> Result<GenerateOutputSuccess, FlowError> {
         if let Some(chunk) = state.chunk.as_mut() {
             chunk.buffer.extend_from_slice(samples);
+            if (buffer.pts().unwrap() - chunk.start_pts).mseconds() > DEFAULT_MAX_VOICE_ACTIVITY_MS
+            {
+                gstreamer::info!(CAT, "voice activity longer than 10s");
+                if let Some(chunk) = state.chunk.take() {
+                    let maybe_buffer = self.run_model(state, chunk)?;
+                    return Ok(maybe_buffer
+                        .map(GenerateOutputSuccess::Buffer)
+                        .unwrap_or(GenerateOutputSuccess::NoOutput));
+                }
+            }
         } else {
             gstreamer::info!(CAT, "voice activity started");
             state.chunk = Some(Chunk {
@@ -375,7 +386,6 @@ impl WhisperFilter {
                     .collect(),
             });
         }
-
         Ok(GenerateOutputSuccess::NoOutput)
     }
     /// Handles the end of voice activity by storing the previous buffer, checking if there is a chunk of audio to process, and running the model on the chunk if it exists.
