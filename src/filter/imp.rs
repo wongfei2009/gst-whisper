@@ -74,6 +74,7 @@ static SRC_CAPS: Lazy<Caps> =
 struct Settings {
     vad_mode: String,
     min_voice_activity_ms: u64,
+    max_voice_activity_ms: u64,
     language: String,
     translate: bool,
     context: bool,
@@ -196,6 +197,7 @@ impl ObjectSubclass for WhisperFilter {
             settings: Mutex::new(Settings {
                 vad_mode: DEFAULT_VAD_MODE.into(),
                 min_voice_activity_ms: DEFAULT_MIN_VOICE_ACTIVITY_MS,
+                max_voice_activity_ms: DEFAULT_MAX_VOICE_ACTIVITY_MS,
                 language: DEFAULT_LANGUAGE.into(),
                 translate: DEFAULT_TRANSLATE,
                 context: DEFAULT_CONTEXT,
@@ -221,6 +223,13 @@ impl ObjectImpl for WhisperFilter {
             glib::ParamSpecInt::builder("min-voice-activity-ms")
             .nick("Minimum voice activity")
             .blurb(&format!("The minimum duration of voice that must be detected for the model to run, in milliseconds. Defaults to {}ms.", DEFAULT_MIN_VOICE_ACTIVITY_MS))
+            .mutable_ready()
+            .mutable_paused()
+            .mutable_playing()
+            .build(),
+            glib::ParamSpecInt::builder("max-voice-activity-ms")
+            .nick("Maximum voice activity")
+            .blurb(&format!("The maximum duration of voice for the model to run, in milliseconds. Defaults to {}ms.", DEFAULT_MAX_VOICE_ACTIVITY_MS))
             .mutable_ready()
             .mutable_paused()
             .mutable_playing()
@@ -261,6 +270,9 @@ impl ObjectImpl for WhisperFilter {
             "min-voice-activity-ms" => {
                 settings.min_voice_activity_ms = value.get().unwrap();
             }
+            "max-voice-activity-ms" => {
+                settings.max_voice_activity_ms = value.get().unwrap();
+            }
             "language" => {
                 settings.language = value.get().unwrap();
             }
@@ -280,6 +292,7 @@ impl ObjectImpl for WhisperFilter {
         match pspec.name() {
             "vad-mode" => settings.vad_mode.to_value(),
             "min-voice-activity-ms" => settings.min_voice_activity_ms.to_value(),
+            "max-voice-activity-ms" => settings.max_voice_activity_ms.to_value(),
             "language" => settings.language.to_value(),
             "translate" => settings.translate.to_value(),
             "context" => settings.context.to_value(),
@@ -364,8 +377,8 @@ impl WhisperFilter {
     ) -> Result<GenerateOutputSuccess, FlowError> {
         if let Some(chunk) = state.chunk.as_mut() {
             chunk.buffer.extend_from_slice(samples);
-            if (buffer.pts().unwrap() - chunk.start_pts).mseconds() > DEFAULT_MAX_VOICE_ACTIVITY_MS
-            {
+            let max_voice_activity_ms = self.settings.lock().unwrap().max_voice_activity_ms;
+            if (buffer.pts().unwrap() - chunk.start_pts).mseconds() > max_voice_activity_ms {
                 gstreamer::info!(CAT, "voice activity longer than 10s");
                 if let Some(chunk) = state.chunk.take() {
                     let maybe_buffer = self.run_model(state, chunk)?;
