@@ -55,6 +55,7 @@ static CAT: Lazy<DebugCategory> = Lazy::new(|| {
     )
 });
 
+/// The sink caps for the audio filter.
 static SINK_CAPS: Lazy<Caps> = Lazy::new(|| {
     AudioCapsBuilder::new()
         .format(AUDIO_FORMAT_S16)
@@ -64,6 +65,7 @@ static SINK_CAPS: Lazy<Caps> = Lazy::new(|| {
         .build()
 });
 
+/// The source caps for the audio filter.
 static SRC_CAPS: Lazy<Caps> =
     Lazy::new(|| Caps::builder("text/x-raw").field("format", "utf8").build());
 
@@ -113,6 +115,7 @@ impl WhisperFilter {
         params.set_print_special(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        params.set_single_segment(true);
         params.set_suppress_blank(true);
         params.set_suppress_non_speech_tokens(true);
         {
@@ -144,36 +147,31 @@ impl WhisperFilter {
         }
         let duration =
             (samples.len() as u64 - chunk.prev_buffer_size as u64) * 1000 / SAMPLE_RATE as u64;
-        let mut transcribed_text = String::new();
-        for i in 0..n_segments {
-            let segment = state.whisper_state.full_get_segment_text(i).ok().unwrap();
-            let segment = segment
-                .replace("[BLANK_AUDIO]", "")
-                .replace("[ Silence ]", "")
-                .replace("[silence]", "")
-                .replace("(silence)", "")
-                .replace("[ Pause ]", "")
-                .trim()
-                .to_owned();
+        let segment = state.whisper_state.full_get_segment_text(0).ok().unwrap();
+        let segment = segment
+            .replace("[BLANK_AUDIO]", "")
+            .replace("[ Silence ]", "")
+            .replace("[silence]", "")
+            .replace("(silence)", "")
+            .replace("[ Pause ]", "")
+            .trim()
+            .to_owned();
 
-            let segment = format!("{}\n", segment);
-            transcribed_text.push_str(&segment);
-        }
-        let mut buffer = Buffer::with_size(transcribed_text.len()).map_err(|_| FlowError::Error)?;
+        let segment = format!("{}\n", segment);
+        let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
         buffer_mut.set_pts(chunk.start_pts);
         buffer_mut.set_duration(ClockTime::from_mseconds(duration));
         buffer_mut
-            .copy_from_slice(0, transcribed_text.as_bytes())
+            .copy_from_slice(0, segment.as_bytes())
             .map_err(|_| FlowError::Error)?;
 
         gstreamer::info!(
             CAT,
-            "Start pts: {:?}, duration: {:?}, text: {:?}, n_segments: {:?}",
+            "Start pts: {:?}, duration: {:?}, text: {:?}",
             buffer.pts().unwrap(),
             buffer.duration().unwrap(),
-            transcribed_text,
-            n_segments
+            segment
         );
         Ok(Some(buffer))
     }
