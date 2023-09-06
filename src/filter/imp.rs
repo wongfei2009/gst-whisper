@@ -162,7 +162,7 @@ impl WhisperFilter {
         let segment = format!("{}\n", segment);
         let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
-        buffer_mut.set_pts(chunk.start_pts.checked_add(ClockTime::from_mseconds(500)));
+        buffer_mut.set_pts(chunk.start_pts.checked_add(ClockTime::from_mseconds(2000)));
         buffer_mut.set_duration(ClockTime::from_mseconds(duration));
         buffer_mut
             .copy_from_slice(0, segment.as_bytes())
