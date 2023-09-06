@@ -12,11 +12,21 @@
                 "!",
                 "decodebin",
                 "!",
+                "tee",
+                "name=t",
+                "!",
+                "queue",
+                "max-size-time=0",
+                "max-size-bytes=0",
+                "max-size-buffers=0",
+                "!",
+                "audioconvert",
+                "!",
                 "audiobuffersplit",
                 "!",
                 "audioconvert",
                 "!",
-                "queue",
+                "audioresample",
                 "!",
                 "whisper",
                 "!",
@@ -24,13 +34,24 @@
                 "!",
                 "videoconvert",
                 "!",
-                "autovideosink"
+                "osxvideosink",
+                "t.",
+                "!",
+                "queue",
+                "max-size-time=0",
+                "max-size-bytes=0",
+                "max-size-buffers=0",
+                "!",
+                "audioconvert",
+                "!",
+                "autoaudiosink"
             ],
             "cwd": "${workspaceFolder}",
             "env": {
                 "GST_PLUGIN_PATH": "${workspaceFolder}/target/x86_64-apple-darwin/debug",
                 "WHISPER_MODEL_PATH": "${workspaceFolder}/../whisper.cpp/models/ggml-base.en.bin",
-                "GST_DEBUG": "2,whisper:4" 
+                "GST_DEBUG": "2,whisper:4",
+                "GST_DEBUG_DUMP_DOT_DIR": "/tmp/"
             }
         }
     ]
