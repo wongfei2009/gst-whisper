@@ -44,6 +44,8 @@
                 "!",
                 "audioconvert",
                 "!",
+                "audioresample",
+                "!",
                 "autoaudiosink"
             ],
             "cwd": "${workspaceFolder}",
