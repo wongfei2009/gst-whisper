@@ -32,8 +32,9 @@ use whisper_rs::{
 
 const SAMPLE_RATE: usize = 16_000;
 const DEFAULT_VAD_MODE: &str = "quality";
-const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 40;
+const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 100;
 const DEFAULT_MAX_VOICE_ACTIVITY_MS: u64 = 10000;
+const DEFAULT_PTS_OFFSET_MS: u64 = 100;
 const DEFAULT_LANGUAGE: &str = "auto";
 const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
@@ -75,6 +76,7 @@ struct Settings {
     vad_mode: String,
     min_voice_activity_ms: u64,
     max_voice_activity_ms: u64,
+    pts_offset_ms: u64,
     language: String,
     translate: bool,
     context: bool,
@@ -135,6 +137,7 @@ impl WhisperFilter {
     /// Runs the whisper model on the given audio chunk and returns the resulting text segment as a buffer.
     fn run_model(&self, state: &mut State, chunk: Chunk) -> Result<Option<Buffer>, FlowError> {
         let samples = convert_integer_to_float_audio(&chunk.buffer);
+        let pts_offset_ms = self.settings.lock().unwrap().pts_offset_ms;
 
         let start = Instant::now();
         state
@@ -162,7 +165,7 @@ impl WhisperFilter {
         let segment = format!("{}\n", segment);
         let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
-        buffer_mut.set_pts(chunk.start_pts.checked_add(ClockTime::from_mseconds(2000)));
+        buffer_mut.set_pts(chunk.start_pts.checked_add(ClockTime::from_mseconds(pts_offset_ms)));
         buffer_mut.set_duration(ClockTime::from_mseconds(duration));
         buffer_mut
             .copy_from_slice(0, segment.as_bytes())
@@ -198,6 +201,7 @@ impl ObjectSubclass for WhisperFilter {
                 vad_mode: DEFAULT_VAD_MODE.into(),
                 min_voice_activity_ms: DEFAULT_MIN_VOICE_ACTIVITY_MS,
                 max_voice_activity_ms: DEFAULT_MAX_VOICE_ACTIVITY_MS,
+                pts_offset_ms: DEFAULT_PTS_OFFSET_MS,
                 language: DEFAULT_LANGUAGE.into(),
                 translate: DEFAULT_TRANSLATE,
                 context: DEFAULT_CONTEXT,
@@ -230,6 +234,13 @@ impl ObjectImpl for WhisperFilter {
             glib::ParamSpecInt::builder("max-voice-activity-ms")
             .nick("Maximum voice activity")
             .blurb(&format!("The maximum duration of voice for the model to run, in milliseconds. Defaults to {}ms.", DEFAULT_MAX_VOICE_ACTIVITY_MS))
+            .mutable_ready()
+            .mutable_paused()
+            .mutable_playing()
+            .build(),
+            glib::ParamSpecInt::builder("pts-offset-ms")
+            .nick("Presentation timestamp offset")
+            .blurb(&format!("Presentation timestamp offset for output buffers, in milliseconds. Defaults to {}ms.", DEFAULT_PTS_OFFSET_MS))
             .mutable_ready()
             .mutable_paused()
             .mutable_playing()
@@ -273,6 +284,9 @@ impl ObjectImpl for WhisperFilter {
             "max-voice-activity-ms" => {
                 settings.max_voice_activity_ms = value.get().unwrap();
             }
+            "pts-offset-ms" => {
+                settings.pts_offset_ms = value.get().unwrap();
+            }
             "language" => {
                 settings.language = value.get().unwrap();
             }
@@ -293,6 +307,7 @@ impl ObjectImpl for WhisperFilter {
             "vad-mode" => settings.vad_mode.to_value(),
             "min-voice-activity-ms" => settings.min_voice_activity_ms.to_value(),
             "max-voice-activity-ms" => settings.max_voice_activity_ms.to_value(),
+            "pts-offset-ms" => settings.pts_offset_ms.to_value(),
             "language" => settings.language.to_value(),
             "translate" => settings.translate.to_value(),
             "context" => settings.context.to_value(),
