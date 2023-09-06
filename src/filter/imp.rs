@@ -32,7 +32,7 @@ use whisper_rs::{
 
 const SAMPLE_RATE: usize = 16_000;
 const DEFAULT_VAD_MODE: &str = "quality";
-const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 100;
+const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 200;
 const DEFAULT_MAX_VOICE_ACTIVITY_MS: u64 = 10000;
 const DEFAULT_PTS_OFFSET_MS: u64 = 100;
 const DEFAULT_LANGUAGE: &str = "auto";
@@ -144,7 +144,7 @@ impl WhisperFilter {
             .whisper_state
             .full(self.whisper_params(), &samples)
             .unwrap();
-        gstreamer::debug!(CAT, "model took {:?}", start.elapsed());
+        gstreamer::info!(CAT, "model took {:?}", start.elapsed());
 
         let n_segments = state.whisper_state.full_n_segments().unwrap();
         if n_segments == 0 {
@@ -391,6 +391,7 @@ impl WhisperFilter {
         buffer: &Buffer,
     ) -> Result<GenerateOutputSuccess, FlowError> {
         if let Some(chunk) = state.chunk.as_mut() {
+            gstreamer::debug!(CAT, "voice activity extends");
             chunk.buffer.extend_from_slice(samples);
             let max_voice_activity_ms = self.settings.lock().unwrap().max_voice_activity_ms;
             if (buffer.pts().unwrap() - chunk.start_pts).mseconds() > max_voice_activity_ms {
@@ -443,6 +444,7 @@ impl WhisperFilter {
                 Ok(GenerateOutputSuccess::NoOutput)
             }
         } else {
+            gstreamer::debug!(CAT, "no voice activity to process");
             Ok(GenerateOutputSuccess::NoOutput)
         }
     }
