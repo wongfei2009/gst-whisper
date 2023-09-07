@@ -7,7 +7,7 @@ use gstreamer::{
     element_imp_error,
     glib::{self, ParamSpec, Value},
     param_spec::GstParamSpecBuilderExt,
-    prelude::{ParamSpecBuilderExt, ToValue},
+    prelude::{OptionCheckedSub, ParamSpecBuilderExt, ToValue},
     subclass::{
         prelude::{ElementImpl, GstObjectImpl, ObjectImpl, ObjectSubclass, ObjectSubclassExt},
         ElementMetadata,
@@ -18,6 +18,7 @@ use gstreamer::{
 };
 use gstreamer_audio::{AudioCapsBuilder, AudioLayout, AUDIO_FORMAT_S16};
 use gstreamer_base::{
+    prelude::ClockExt,
     subclass::{
         base_transform::{BaseTransformImpl, BaseTransformImplExt, GenerateOutputSuccess},
         BaseTransformMode,
@@ -34,10 +35,12 @@ const SAMPLE_RATE: usize = 16_000;
 const DEFAULT_VAD_MODE: &str = "quality";
 const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 200;
 const DEFAULT_MAX_VOICE_ACTIVITY_MS: u64 = 10000;
+const DEFAULT_DO_TIMESTAMP: bool = false;
 const DEFAULT_PTS_OFFSET_MS: u64 = 100;
 const DEFAULT_LANGUAGE: &str = "auto";
 const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
+
 
 /// A static variable that holds a lazy-initialized `WhisperContext` instance.
 /// The `WhisperContext` instance is created using the path specified in the `WHISPER_MODEL_PATH` environment variable.
@@ -76,6 +79,7 @@ struct Settings {
     vad_mode: String,
     min_voice_activity_ms: u64,
     max_voice_activity_ms: u64,
+    do_timestamp: bool,
     pts_offset_ms: u64,
     language: String,
     translate: bool,
@@ -165,7 +169,24 @@ impl WhisperFilter {
         let segment = format!("{}\n", segment);
         let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
-        buffer_mut.set_pts(chunk.start_pts.checked_add(ClockTime::from_mseconds(pts_offset_ms)));
+        let do_timestamp = self.settings.lock().unwrap().do_timestamp;
+        if do_timestamp {
+            let elem = self.obj();
+            let now = elem
+                .clock()
+                .unwrap()
+                .time()
+                .unwrap()
+                .checked_add(ClockTime::from_mseconds(pts_offset_ms));
+            let base_time = elem.base_time();
+            buffer_mut.set_pts(now.opt_checked_sub(base_time).ok().flatten());
+        } else {
+            buffer_mut.set_pts(
+                chunk
+                    .start_pts
+                    .checked_add(ClockTime::from_mseconds(pts_offset_ms)),
+            );
+        }
         buffer_mut.set_duration(ClockTime::from_mseconds(duration));
         buffer_mut
             .copy_from_slice(0, segment.as_bytes())
@@ -201,6 +222,7 @@ impl ObjectSubclass for WhisperFilter {
                 vad_mode: DEFAULT_VAD_MODE.into(),
                 min_voice_activity_ms: DEFAULT_MIN_VOICE_ACTIVITY_MS,
                 max_voice_activity_ms: DEFAULT_MAX_VOICE_ACTIVITY_MS,
+                do_timestamp: DEFAULT_DO_TIMESTAMP,
                 pts_offset_ms: DEFAULT_PTS_OFFSET_MS,
                 language: DEFAULT_LANGUAGE.into(),
                 translate: DEFAULT_TRANSLATE,
@@ -237,6 +259,11 @@ impl ObjectImpl for WhisperFilter {
             .mutable_ready()
             .mutable_paused()
             .mutable_playing()
+            .build(),
+            glib::ParamSpecBoolean::builder("do-timestamp")
+            .nick("Do Timestamp")
+            .blurb("Timestamp output buffers with the current running time on generation")
+            .default_value(DEFAULT_DO_TIMESTAMP)
             .build(),
             glib::ParamSpecUInt64::builder("pts-offset-ms")
             .nick("Presentation timestamp offset")
@@ -284,6 +311,9 @@ impl ObjectImpl for WhisperFilter {
             "max-voice-activity-ms" => {
                 settings.max_voice_activity_ms = value.get().unwrap();
             }
+            "do-timestamp" => {
+                settings.do_timestamp = value.get().unwrap();
+            }
             "pts-offset-ms" => {
                 settings.pts_offset_ms = value.get().unwrap();
             }
@@ -307,6 +337,7 @@ impl ObjectImpl for WhisperFilter {
             "vad-mode" => settings.vad_mode.to_value(),
             "min-voice-activity-ms" => settings.min_voice_activity_ms.to_value(),
             "max-voice-activity-ms" => settings.max_voice_activity_ms.to_value(),
+            "do-timestamp" => settings.do_timestamp.to_value(),
             "pts-offset-ms" => settings.pts_offset_ms.to_value(),
             "language" => settings.language.to_value(),
             "translate" => settings.translate.to_value(),
