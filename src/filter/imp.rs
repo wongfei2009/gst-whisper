@@ -1,6 +1,6 @@
 mod vad;
 
-use std::{env, sync::Mutex, time::Instant};
+use std::{collections::VecDeque, env, sync::Mutex, time::Instant};
 
 use byte_slice_cast::AsSliceOf;
 use gstreamer::{
@@ -40,7 +40,6 @@ const DEFAULT_PTS_OFFSET_MS: u64 = 100;
 const DEFAULT_LANGUAGE: &str = "auto";
 const DEFAULT_TRANSLATE: bool = false;
 const DEFAULT_CONTEXT: bool = true;
-
 
 /// A static variable that holds a lazy-initialized `WhisperContext` instance.
 /// The `WhisperContext` instance is created using the path specified in the `WHISPER_MODEL_PATH` environment variable.
@@ -95,7 +94,7 @@ struct State {
     /// The current audio chunk being processed.
     chunk: Option<Chunk>,
     /// The previous audio buffer.
-    prev_buffer: Vec<i16>,
+    prev_buffer: RingBuffer<i16>,
 }
 
 /// A struct representing an audio chunk with its starting presentation timestamp and buffer.
@@ -103,6 +102,37 @@ struct Chunk {
     prev_buffer_size: usize,
     start_pts: ClockTime,
     buffer: Vec<i16>,
+}
+
+struct RingBuffer<T> {
+    buffer: VecDeque<T>,
+    capacity: usize,
+}
+
+impl<T> RingBuffer<T> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            buffer: VecDeque::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn push(&mut self, item: T) {
+        if self.buffer.len() == self.capacity {
+            self.buffer.pop_front();
+        }
+        self.buffer.push_back(item);
+    }
+
+    fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    fn clear(&mut self) -> Vec<T> {
+        let mut vec = Vec::with_capacity(self.buffer.len());
+        vec.extend(self.buffer.drain(..));
+        vec
+    }
 }
 
 /// A struct representing a WhisperFilter.
@@ -441,6 +471,7 @@ impl WhisperFilter {
                 start_pts: buffer.pts().unwrap(),
                 buffer: state
                     .prev_buffer
+                    .clear()
                     .drain(..)
                     .chain(samples.iter().copied())
                     .collect(),
@@ -456,8 +487,9 @@ impl WhisperFilter {
         samples: &[i16],
         buffer: &Buffer,
     ) -> Result<GenerateOutputSuccess, FlowError> {
-        state.prev_buffer = samples.to_vec();
-
+        for sample in samples {
+            state.prev_buffer.push(*sample);
+        }
         if let Some(chunk) = state.chunk.take() {
             gstreamer::info!(CAT, "voice activity ended");
             let min_voice_activity_ms = self.settings.lock().unwrap().min_voice_activity_ms;
@@ -467,7 +499,7 @@ impl WhisperFilter {
                     .map(GenerateOutputSuccess::Buffer)
                     .unwrap_or(GenerateOutputSuccess::NoOutput))
             } else {
-                gstreamer::warning!(
+                gstreamer::info!(
                     CAT,
                     "discarding voice activity < {}ms",
                     min_voice_activity_ms
@@ -512,7 +544,9 @@ impl BaseTransformImpl for WhisperFilter {
             whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
             voice_activity_detector: Some(vad::VoiceActivityDetector::new(vad_mode)),
             chunk: None,
-            prev_buffer: Vec::new(),
+            prev_buffer: RingBuffer::new(
+                SAMPLE_RATE / 5,
+            ),
         });
 
         gstreamer::debug!(CAT, "started");
