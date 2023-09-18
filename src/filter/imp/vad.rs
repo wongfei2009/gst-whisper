@@ -16,14 +16,16 @@ impl VoiceActivityDetector {
         let path = Path::new(&path_str);
 
         let sampling_rate: i32 = SAMPLE_RATE as i32;
-        let threshold = 0.25f32;
-        let min_silence_duration_ms = 0;
+        let threshold = 0.4f32;
+        let threshold_margin = 0.04f32;
+        let min_silence_duration_ms = 30;
         let speech_pad_ms = 0;
 
         let vad = VadIterator::new(
             &path,
             sampling_rate,
             threshold,
+            threshold_margin,
             min_silence_duration_ms,
             speech_pad_ms
         )
