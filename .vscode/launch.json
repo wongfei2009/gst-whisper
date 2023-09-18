@@ -57,7 +57,7 @@
                 "audio/x-raw,format=S16LE,channels=1,rate=16000",
                 "!",
                 "audiobuffersplit",
-                "output-buffer-duration=1/100",
+                "output-buffer-duration=4/125",
                 "!",
                 "audioconvert",
                 "!",
@@ -71,8 +71,12 @@
             "env": {
                 "GST_PLUGIN_PATH": "${workspaceFolder}/target/x86_64-apple-darwin/debug",
                 "WHISPER_MODEL_PATH": "${workspaceFolder}/../whisper.cpp/models/ggml-base.en.bin",
+                "SILERO_VAD_MODEL_PATH": "${workspaceFolder}/../silero-vad/files/silero_vad.onnx",
                 "GST_DEBUG": "2,whisper:4",
-                "GST_DEBUG_DUMP_DOT_DIR": "/tmp/"
+                "GST_DEBUG_DUMP_DOT_DIR": "/tmp/",
+                "ORT_STRATEGY": "system",
+                "ORT_LIB_LOCATION": "/usr/local/Cellar/onnxruntime/1.15.1/lib",
+                "ORT_DYLIB_PATH": "/usr/local/Cellar/onnxruntime/1.15.1/lib/libonnxruntime.dylib"
             }
         },
         {
@@ -102,6 +106,17 @@
                 "max-size-bytes=0",
                 "max-size-buffers=0",
                 "!",
+                "audioconvert",
+                "!",
+                "audioresample",
+                "!",
+                "audio/x-raw,format=S16LE,channels=1,rate=16000",
+                "!",
+                "audiobuffersplit",
+                "output-buffer-duration=4/125",
+                "!",
+                "audioconvert",
+                "!",
                 "whisper",
                 "language=en",
                 "do-timestamp=true",
@@ -120,8 +135,12 @@
             "env": {
                 "GST_PLUGIN_PATH": "${workspaceFolder}/target/x86_64-apple-darwin/debug",
                 "WHISPER_MODEL_PATH": "${workspaceFolder}/../whisper.cpp/models/ggml-base.en.bin",
+                "SILERO_VAD_MODEL_PATH": "${workspaceFolder}/../silero-vad/files/silero_vad.onnx",
                 "GST_DEBUG": "2,whisper:4",
-                "GST_DEBUG_DUMP_DOT_DIR": "/tmp/"
+                "GST_DEBUG_DUMP_DOT_DIR": "/tmp/",
+                "ORT_STRATEGY": "system",
+                "ORT_LIB_LOCATION": "/usr/local/Cellar/onnxruntime/1.15.1/lib",
+                "ORT_DYLIB_PATH": "/usr/local/Cellar/onnxruntime/1.15.1/lib/libonnxruntime.dylib"
             }
         }
     ]

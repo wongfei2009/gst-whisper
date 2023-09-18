@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT/Apache-2.0"
 readme = "README.md"
-authors = ["Jasper Hugo <jasper@avstack.io>"]
+authors = ["Wong Fei <wongfei2009@gmail.com>"]
 description = "A GStreamer filter that performs speech-to-text using Whisper"
-repository = "https://github.com/avstack/gst-whisper"
+repository = "https://github.com/wongfei2009/gst-whisper"
 
 [dependencies]
 byte-slice-cast = { version = "1", default-features = false }
@@ -14,8 +14,8 @@ gstreamer = { version = "0.20", default-features = false }
 gstreamer-audio = { version = "0.20", default-features = false }
 gstreamer-base = { version = "0.20", default-features = false }
 once_cell = { version = "1", default-features = false, features = ["std"] }
-webrtc-vad = { version = "0.4", default-features = false }
 whisper-rs = { version = "0.8", git="https://github.com/tazz4843/whisper-rs", default-features = false }
+silero-vad-rs = { version = "0.1", git="https://github.com/wongfei2009/silero-vad-rs"}
 
 [dev-dependencies]
 gstreamer-check = { version = "0.20", default-features = false }

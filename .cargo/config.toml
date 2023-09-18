@@ -1,0 +1,7 @@
+[env]
+ORT_STRATEGY = "system"
+ORT_LIB_LOCATION = "/usr/local/Cellar/onnxruntime/1.15.1/lib"
+ORT_DYLIB_PATH = "/usr/local/Cellar/onnxruntime/1.15.1/lib/libonnxruntime.dylib"
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-args=-Wl,-rpath,/usr/local/Cellar/onnxruntime/1.15.1/lib"]

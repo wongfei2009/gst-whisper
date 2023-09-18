@@ -26,13 +26,11 @@ use gstreamer_base::{
     BaseTransform,
 };
 use once_cell::sync::Lazy;
-use webrtc_vad::VadMode;
 use whisper_rs::{
     convert_integer_to_float_audio, FullParams, SamplingStrategy, WhisperContext, WhisperState,
 };
 
 const SAMPLE_RATE: usize = 16_000;
-const DEFAULT_VAD_MODE: &str = "quality";
 const DEFAULT_MIN_VOICE_ACTIVITY_MS: u64 = 200;
 const DEFAULT_MAX_VOICE_ACTIVITY_MS: u64 = 10000;
 const DEFAULT_DO_TIMESTAMP: bool = false;
@@ -75,7 +73,6 @@ static SRC_CAPS: Lazy<Caps> =
 
 /// Struct representing the settings for the whisper filter.
 struct Settings {
-    vad_mode: String,
     min_voice_activity_ms: u64,
     max_voice_activity_ms: u64,
     do_timestamp: bool,
@@ -249,7 +246,6 @@ impl ObjectSubclass for WhisperFilter {
     fn new() -> Self {
         Self {
             settings: Mutex::new(Settings {
-                vad_mode: DEFAULT_VAD_MODE.into(),
                 min_voice_activity_ms: DEFAULT_MIN_VOICE_ACTIVITY_MS,
                 max_voice_activity_ms: DEFAULT_MAX_VOICE_ACTIVITY_MS,
                 do_timestamp: DEFAULT_DO_TIMESTAMP,
@@ -269,13 +265,6 @@ impl ObjectImpl for WhisperFilter {
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
             vec![
-            glib::ParamSpecString::builder("vad-mode")
-            .nick("VAD mode")
-            .blurb(&format!("The aggressiveness of voice detection. Defaults to '{}'. Other options are 'low-bitrate', 'aggressive' and 'very-aggressive'.", DEFAULT_VAD_MODE))
-            .mutable_ready()
-            .mutable_paused()
-            .mutable_playing()
-            .build(),
             glib::ParamSpecUInt64::builder("min-voice-activity-ms")
             .nick("Minimum voice activity")
             .blurb(&format!("The minimum duration of voice that must be detected for the model to run, in milliseconds. Defaults to {}ms.", DEFAULT_MIN_VOICE_ACTIVITY_MS))
@@ -332,9 +321,6 @@ impl ObjectImpl for WhisperFilter {
     fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
         let mut settings = self.settings.lock().unwrap();
         match pspec.name() {
-            "vad-mode" => {
-                settings.vad_mode = value.get().unwrap();
-            }
             "min-voice-activity-ms" => {
                 settings.min_voice_activity_ms = value.get().unwrap();
             }
@@ -364,7 +350,6 @@ impl ObjectImpl for WhisperFilter {
     fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
         let settings = self.settings.lock().unwrap();
         match pspec.name() {
-            "vad-mode" => settings.vad_mode.to_value(),
             "min-voice-activity-ms" => settings.min_voice_activity_ms.to_value(),
             "max-voice-activity-ms" => settings.max_voice_activity_ms.to_value(),
             "do-timestamp" => settings.do_timestamp.to_value(),
@@ -431,13 +416,13 @@ impl WhisperFilter {
     /// Creates a new buffer for voice activity detection (VAD) based on the given samples.
     fn new_vad_buffer(&self, samples: &[i16]) -> Option<Vec<i16>> {
         let buffer_len = samples.len();
-        if buffer_len >= 160 {
-            let vad_buffer = if buffer_len >= 480 {
-                &samples[0..480]
-            } else if buffer_len >= 320 {
-                &samples[0..320]
+        if buffer_len >= 256 {
+            let vad_buffer = if buffer_len >= 768 {
+                &samples[0..768]
+            } else if buffer_len >= 512 {
+                &samples[0..512]
             } else {
-                &samples[0..160]
+                &samples[0..256]
             };
             Some(vad_buffer.to_vec())
         } else {
@@ -532,17 +517,9 @@ impl BaseTransformImpl for WhisperFilter {
 
     /// Starts the filter with the specified settings.
     fn start(&self) -> Result<(), ErrorMessage> {
-        let vad_mode = match self.settings.lock().unwrap().vad_mode.as_str() {
-            "quality" => VadMode::Quality,
-            "low-bitrate" => VadMode::LowBitrate,
-            "aggressive" => VadMode::Aggressive,
-            "very-aggressive" => VadMode::VeryAggressive,
-            other => panic!("invalid VAD mode: {}", other),
-        };
-
         *self.state.lock().unwrap() = Some(State {
             whisper_state: WHISPER_CONTEXT.create_state().unwrap(),
-            voice_activity_detector: Some(vad::VoiceActivityDetector::new(vad_mode)),
+            voice_activity_detector: Some(vad::VoiceActivityDetector::new()),
             chunk: None,
             prev_buffer: RingBuffer::new(
                 SAMPLE_RATE / 5,
@@ -597,7 +574,7 @@ impl BaseTransformImpl for WhisperFilter {
             let samples = self.read_samples(&buffer)?;
             let vad_buffer = self.new_vad_buffer(&samples);
             if let Some(vad_buffer) = vad_buffer {
-                if let Some(vad) = &state.voice_activity_detector {
+                if let Some(vad) = &mut state.voice_activity_detector {
                     if vad.is_voice_segment(&vad_buffer).unwrap() {
                         return self.handle_voice_activity(state, &samples, &buffer);
                     }
