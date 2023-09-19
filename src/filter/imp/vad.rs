@@ -10,7 +10,7 @@ pub struct VoiceActivityDetector {
 }
 
 impl VoiceActivityDetector {
-    /// Creates a new instance of `Vad` with the specified `vad_mode`.
+    /// Creates a new instance of `Vad`.
     pub fn new() -> Self {
         let path_str = env::var("SILERO_VAD_MODEL_PATH").unwrap();
         let path = Path::new(&path_str);
@@ -44,7 +44,7 @@ impl VoiceActivityDetector {
     ///
     /// * `Ok(true)` if the buffer contains a voice segment.
     /// * `Ok(false)` if the buffer does not contain a voice segment.
-    /// * `Err(())` if there was an error sending the buffer to the VAD sender.
+    /// * `Err(())` if there was an error.
     pub fn is_voice_segment(&mut self, buffer: &[i16]) -> Result<bool, ()> {
         let buffer_f32: Vec<f32> = buffer.iter().map(|&x| x as f32).collect();
         self.vad.predict(&buffer_f32);
