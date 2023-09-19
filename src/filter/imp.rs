@@ -192,7 +192,6 @@ impl WhisperFilter {
             .replace("[ Pause ]", "")
             .trim()
             .to_owned();
-
         let segment = format!("{}\n", segment);
         let mut buffer = Buffer::with_size(segment.len()).map_err(|_| FlowError::Error)?;
         let buffer_mut = buffer.get_mut().ok_or(FlowError::Error)?;
